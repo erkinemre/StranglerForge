@@ -1,0 +1,312 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SQLSERVER_SA_PASSWORD:?Set SQLSERVER_SA_PASSWORD}
+    ports: ["1433:1433"]
+    volumes: ["sqlserver-data:/var/opt/mssql"]
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: stranglerforge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: stranglerforge_catalog
+    ports: ["5432:5432"]
+    volumes: ["postgres-data:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stranglerforge -d stranglerforge_catalog"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  inventory-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: stranglerforge
+      POSTGRES_PASSWORD: ${INVENTORY_POSTGRES_PASSWORD:?Set INVENTORY_POSTGRES_PASSWORD}
+      POSTGRES_DB: stranglerforge_inventory
+    ports: ["5433:5432"]
+    volumes: ["inventory-postgres-data:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stranglerforge -d stranglerforge_inventory"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  orders-postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: stranglerforge
+      POSTGRES_PASSWORD: ${ORDERS_POSTGRES_PASSWORD:?Set ORDERS_POSTGRES_PASSWORD}
+      POSTGRES_DB: stranglerforge_orders
+    ports: ["5434:5432"]
+    volumes: ["orders-postgres-data:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stranglerforge -d stranglerforge_orders"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
+    ports: ["5672:5672", "15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  catalog:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        PROJECT: src/Services/Catalog/Catalog.Api/Catalog.Api.csproj
+        ASSEMBLY: Catalog.Api.dll
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Catalog: Host=postgres;Port=5432;Database=stranglerforge_catalog;Username=stranglerforge;Password=${POSTGRES_PASSWORD}
+      Catalog__WritesEnabled: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports: ["5082:8080"]
+
+  inventory:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        PROJECT: src/Services/Inventory/Inventory.Api/Inventory.Api.csproj
+        ASSEMBLY: Inventory.Api.dll
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Inventory: Host=inventory-postgres;Port=5432;Database=stranglerforge_inventory;Username=stranglerforge;Password=${INVENTORY_POSTGRES_PASSWORD}
+      CatalogService__BaseUrl: http://catalog:8080/
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: ${RABBITMQ_USER}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD}
+    depends_on:
+      inventory-postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports: ["5083:8080"]
+
+  orders:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        PROJECT: src/Services/Orders/Orders.Api/Orders.Api.csproj
+        ASSEMBLY: Orders.Api.dll
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Orders: Host=orders-postgres;Port=5432;Database=stranglerforge_orders;Username=stranglerforge;Password=${ORDERS_POSTGRES_PASSWORD}
+      LegacyService__BaseUrl: http://legacy:8080/
+      CatalogService__BaseUrl: http://catalog:8080/
+      InventoryService__BaseUrl: http://inventory:8080/
+      OrdersInternal__Token: ${ORDERS_INTERNAL_TOKEN:?Set ORDERS_INTERNAL_TOKEN}
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: ${RABBITMQ_USER}
+      RabbitMq__Password: ${RABBITMQ_PASSWORD}
+    depends_on:
+      orders-postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    ports: ["5084:8080"]
+
+  legacy:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        PROJECT: src/LegacyMonolith/LegacyCommerce.Api/LegacyCommerce.Api.csproj
+        ASSEMBLY: LegacyCommerce.Api.dll
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__LegacyCommerce: Server=sqlserver;Database=StranglerForgeLegacyCommerce;User ID=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=true
+      CatalogOwnership__Mode: Extracted
+      CatalogService__BaseUrl: http://catalog:8080/
+      InventoryOwnership__Mode: Extracted
+      InventoryService__BaseUrl: http://inventory:8080/
+      OrdersOwnership__Mode: Extracted
+      OrdersService__BaseUrl: http://orders:8080/
+      OrdersInternal__Token: ${ORDERS_INTERNAL_TOKEN:?Set ORDERS_INTERNAL_TOKEN}
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      catalog:
+        condition: service_started
+      inventory:
+        condition: service_started
+      orders:
+        condition: service_started
+    ports: ["5081:8080"]
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        PROJECT: src/Gateway/StranglerForge.Gateway/StranglerForge.Gateway.csproj
+        ASSEMBLY: StranglerForge.Gateway.dll
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ReverseProxy__Clusters__legacy__Destinations__monolith__Address: http://legacy:8080/
+      ReverseProxy__Clusters__catalog__Destinations__service__Address: http://catalog:8080/
+      ReverseProxy__Clusters__inventory__Destinations__service__Address: http://inventory:8080/
+      ReverseProxy__Clusters__orders__Destinations__service__Address: http://orders:8080/
+      ReverseProxy__Routes__inventory__ClusterId: inventory
+      ReverseProxy__Routes__inventoryStock__ClusterId: inventory
+      ReverseProxy__Routes__reservationCreate__ClusterId: inventory
+      ReverseProxy__Routes__reservationById__ClusterId: inventory
+      ReverseProxy__Routes__reservationRelease__ClusterId: inventory
+      ReverseProxy__Routes__reservationConfirm__ClusterId: inventory
+      ReverseProxy__Routes__orders__ClusterId: orders
+      ReverseProxy__Routes__orderById__ClusterId: orders
+    depends_on: [legacy, catalog, inventory, orders]
+    ports: ["5080:8080"]
+
+  legacy-schema:
+    profiles: ["bootstrap"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.migration
+    environment:
+      ConnectionStrings__LegacyCommerce: Server=sqlserver;Database=StranglerForgeLegacyCommerce;User ID=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=true
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    entrypoint: ["dotnet", "tool", "run", "dotnet-ef"]
+    command: ["database", "update", "--project", "src/LegacyMonolith/LegacyCommerce.Infrastructure", "--startup-project", "src/LegacyMonolith/LegacyCommerce.Api"]
+
+  catalog-import:
+    profiles: ["bootstrap"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.migration
+    environment:
+      ConnectionStrings__LegacyCommerce: Server=sqlserver;Database=StranglerForgeLegacyCommerce;User ID=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=true
+      ConnectionStrings__Catalog: Host=postgres;Port=5432;Database=stranglerforge_catalog;Username=stranglerforge;Password=${POSTGRES_PASSWORD}
+      CATALOG_WRITE_FREEZE_ACK: "true"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    entrypoint: ["dotnet", "/app/migration/Catalog.Migration.dll"]
+    command: ["--import"]
+
+  catalog-verify:
+    profiles: ["bootstrap"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.migration
+    environment:
+      ConnectionStrings__LegacyCommerce: Server=sqlserver;Database=StranglerForgeLegacyCommerce;User ID=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=true
+      ConnectionStrings__Catalog: Host=postgres;Port=5432;Database=stranglerforge_catalog;Username=stranglerforge;Password=${POSTGRES_PASSWORD}
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    entrypoint: ["dotnet", "/app/migration/Catalog.Migration.dll"]
+    command: ["--verify"]
+
+  inventory-import:
+    profiles: ["inventory-cutover"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.migration
+      args:
+        PROJECT: src/Services/Inventory/Inventory.Migration/Inventory.Migration.csproj
+    environment:
+      ConnectionStrings__LegacyCommerce: Server=sqlserver;Database=StranglerForgeLegacyCommerce;User ID=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=true
+      ConnectionStrings__Catalog: Host=postgres;Port=5432;Database=stranglerforge_catalog;Username=stranglerforge;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__Inventory: Host=inventory-postgres;Port=5432;Database=stranglerforge_inventory;Username=stranglerforge;Password=${INVENTORY_POSTGRES_PASSWORD}
+      INVENTORY_WRITE_FREEZE_ACK: "true"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      inventory-postgres:
+        condition: service_healthy
+    entrypoint: ["dotnet", "/app/migration/Inventory.Migration.dll"]
+    command: ["--import"]
+
+  inventory-verify:
+    profiles: ["inventory-cutover"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.migration
+      args:
+        PROJECT: src/Services/Inventory/Inventory.Migration/Inventory.Migration.csproj
+    environment:
+      ConnectionStrings__LegacyCommerce: Server=sqlserver;Database=StranglerForgeLegacyCommerce;User ID=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=true
+      ConnectionStrings__Catalog: Host=postgres;Port=5432;Database=stranglerforge_catalog;Username=stranglerforge;Password=${POSTGRES_PASSWORD}
+      ConnectionStrings__Inventory: Host=inventory-postgres;Port=5432;Database=stranglerforge_inventory;Username=stranglerforge;Password=${INVENTORY_POSTGRES_PASSWORD}
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      inventory-postgres:
+        condition: service_healthy
+    entrypoint: ["dotnet", "/app/migration/Inventory.Migration.dll"]
+    command: ["--verify"]
+
+  orders-import:
+    profiles: ["orders-cutover"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.migration
+      args:
+        PROJECT: src/Services/Orders/Orders.Migration/Orders.Migration.csproj
+    environment:
+      ConnectionStrings__LegacyCommerce: Server=sqlserver;Database=StranglerForgeLegacyCommerce;User ID=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=true
+      ConnectionStrings__Orders: Host=orders-postgres;Port=5432;Database=stranglerforge_orders;Username=stranglerforge;Password=${ORDERS_POSTGRES_PASSWORD}
+      ORDERS_WRITE_FREEZE_ACK: "true"
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      orders-postgres:
+        condition: service_healthy
+    entrypoint: ["dotnet", "/app/migration/Orders.Migration.dll"]
+    command: ["--import"]
+
+  orders-verify:
+    profiles: ["orders-cutover"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.migration
+      args:
+        PROJECT: src/Services/Orders/Orders.Migration/Orders.Migration.csproj
+    environment:
+      ConnectionStrings__LegacyCommerce: Server=sqlserver;Database=StranglerForgeLegacyCommerce;User ID=sa;Password=${SQLSERVER_SA_PASSWORD};TrustServerCertificate=true
+      ConnectionStrings__Orders: Host=orders-postgres;Port=5432;Database=stranglerforge_orders;Username=stranglerforge;Password=${ORDERS_POSTGRES_PASSWORD}
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      orders-postgres:
+        condition: service_healthy
+    entrypoint: ["dotnet", "/app/migration/Orders.Migration.dll"]
+    command: ["--verify"]
+
+volumes:
+  sqlserver-data:
+  postgres-data:
+  inventory-postgres-data:
+  orders-postgres-data:

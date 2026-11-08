@@ -1,0 +1,18 @@
+# Deferred live RabbitMQ and Compose validation for Orders
+
+These commands are for an isolated disposable environment with Docker Desktop or Docker Engine available. They were not executed during Phase 06 because Docker and RabbitMQ were absent. Keep the development Inventory and Orders databases untouched.
+
+1. From the repository root, set `SQLSERVER_SA_PASSWORD`, `POSTGRES_PASSWORD`, `INVENTORY_POSTGRES_PASSWORD`, `ORDERS_POSTGRES_PASSWORD`, `RABBITMQ_USER`, `RABBITMQ_PASSWORD`, and `ORDERS_INTERNAL_TOKEN` through local environment variables or a secret manager. Run `docker compose -f deploy/docker/compose.yml config` and inspect the rendered ports and database names. Do not publish secrets or the rendered config.
+2. Start only isolated infrastructure: `docker compose -f deploy/docker/compose.yml up -d rabbitmq orders-postgres`. Wait for `docker compose -f deploy/docker/compose.yml ps` to show both healthy. Create a dedicated `stranglerforge_orders_live_tests` database with the Compose PostgreSQL container and a dedicated `sf_orders_live_tests` RabbitMQ virtual host. Grant the configured RabbitMQ test user permissions on that virtual host. Use `rabbitmqctl add_vhost` and `rabbitmqctl set_permissions -p sf_orders_live_tests <user> ".*" ".*" ".*"` inside the RabbitMQ container. Do not reuse the application's `/` virtual host or development Orders database.
+For a fresh isolated environment, run these once after health is ready (skip creation if each resource already exists):
+
+```powershell
+docker compose -f deploy/docker/compose.yml exec -T orders-postgres psql -U stranglerforge -d postgres -c "CREATE DATABASE stranglerforge_orders_live_tests;"
+docker compose -f deploy/docker/compose.yml exec -T rabbitmq rabbitmqctl add_vhost sf_orders_live_tests
+docker compose -f deploy/docker/compose.yml exec -T rabbitmq rabbitmqctl set_permissions -p sf_orders_live_tests $env:RABBITMQ_USER ".*" ".*" ".*"
+```
+3. Set `ConnectionStrings__Orders` and `ORDERS_LIVE_TEST_CONNECTION` to the dedicated Orders test database on port 5434. Apply the Orders EF migrations with `dotnet tool run dotnet-ef database update --project src/Services/Orders/Orders.Infrastructure --startup-project src/Services/Orders/Orders.Api`. Set `ORDERS_LIVE_RABBIT_HOST=127.0.0.1`, `ORDERS_LIVE_RABBIT_VHOST=sf_orders_live_tests`, `ORDERS_LIVE_RABBIT_USER`, and `ORDERS_LIVE_RABBIT_PASSWORD`.
+4. Run `dotnet test tests/LiveBrokerTests/Orders.LiveBrokerTests/Orders.LiveBrokerTests.csproj`. The test commits an order while its host points at an unreachable broker, checks that order and outbox rows persist, starts a second host against the real broker, waits for audit consumption, and publishes the same event twice to verify one durable audit effect and one inbox record. A failed or timed-out run must be investigated; do not count it as a pass.
+5. Run a separate operational drill for broker stop/restart, consumer restart, retry and `_error` queue inspection, and multiple Order replicas with concurrent requests. Compare `OrderSagas`, `OutboxMessage`, `InboxState`, and `OrderEventAudit` rows with RabbitMQ queue state. Record message IDs, correlation IDs, transition counts, and duplicate effects. The current local environment cannot validate those drills, and the Phase 06 default tests do not replace them.
+
+Do not run `orders-import` against a database that has accepted new Order Service writes. On a fresh deployment, follow [Order cutover](orders-cutover.md) before starting the full application stack. Stop the isolated infrastructure with `docker compose -f deploy/docker/compose.yml stop rabbitmq orders-postgres`; no volume removal is required.

@@ -1,0 +1,9 @@
+# Inventory extraction impact
+
+The legacy `Stock` table stores **available** quantity. `CreateOrderHandler` decremented it inside a SQL transaction and `ProcessPaymentHandler` restored it on payment failure. `AddStockHandler` and `CommerceQueries` also used `ICommerceStore` stock methods. YARP sent all Inventory routes to the monolith. No stable reservation record or duplicate request protection existed beyond the order payment uniqueness constraint.
+
+Phase 05 introduces a PostgreSQL stock aggregate with total and reserved quantities, stable reservation ID equal to the order ID, atomic conditional stock updates, unique order/reservation constraints, and transactional status changes. `IInventoryGateway` is the monolith application boundary. The legacy SQL adapter remains available only before cutover and for rollback; the typed HTTP adapter is selected by `InventoryOwnership:Mode=Extracted`. Existing public stock and order routes retain their response shapes. Inventory stock additions validate product existence through a bounded Catalog HTTP lookup and return the legacy 404 for an unknown product. The migration tool translates SQL available quantity plus pending order quantities into PostgreSQL total/reserved values and reservation rows.
+
+The SQL order transaction cannot include the PostgreSQL stock transaction. Order creation reserves first, then commits the SQL order; a failed SQL commit triggers release. Payment commits the SQL status and notification, then confirms or releases the reservation. An Inventory outage at that point requires retry/reconciliation. Phase 06 will add durable cross-service orchestration; Phase 05 does not claim a distributed atomic order/payment transaction.
+
+The Phase 05 development reconciliation copied 21 missing referenced products into Catalog, then imported and verified 43 Inventory rows. Inventory PostgreSQL is authoritative. Phase 06 subsequently extracted Orders into its own PostgreSQL database.

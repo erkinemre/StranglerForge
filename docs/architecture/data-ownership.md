@@ -1,0 +1,9 @@
+# Data ownership
+Initially contexts share SQL Server. Extract one context at a time to service-owned PostgreSQL. Backfill and reconcile before switching the authoritative writer. Other contexts use APIs or events, never direct database access. Avoid dual writes.
+Phase 04 transfers Product Catalog writes to PostgreSQL after a write freeze, import, and verification. The legacy SQL Product table remains for audit and rollback but is not used by extracted-mode workflows.
+
+## Phase 05 ownership gate
+Before Inventory cutover, SQL Server Stock remains authoritative. After a verified write freeze and import, Inventory PostgreSQL becomes the only authoritative Inventory writer; SQL Stock is historical. The one-shot migration tool alone reads both stores. Development Inventory data passed this gate in Phase 05. See docs/migration/inventory-cutover.md.
+
+## Phase 06 ownership gate
+After the verified 64-row development import, Orders PostgreSQL owns order creation, state, saga progress, and transition events. SQL order rows are historical. The monolith still owns payment attempts and notifications through token-protected HTTP boundaries. See [Order cutover](../migration/orders-cutover.md).

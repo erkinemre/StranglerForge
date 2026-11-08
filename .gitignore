@@ -1,0 +1,30 @@
+# Build outputs and local IDE state
+**/bin/
+**/obj/
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Local secrets and environment overrides
+.env
+.env.*
+!.env.example
+**/appsettings.Development.json
+**/appsettings.Local.json
+**/secrets.json
+*.pfx
+*.p12
+*.pem
+*.key
+
+# Local data, logs, and temporary artifacts
+logs/
+*.log
+*.bak
+*.dump
+*.sqlite
+*.db
+*.tmp
+*.swp

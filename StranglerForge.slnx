@@ -1,0 +1,43 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Gateway/">
+    <Project Path="src/Gateway/StranglerForge.Gateway/StranglerForge.Gateway.csproj" />
+  </Folder>
+  <Folder Name="/src/LegacyMonolith/">
+    <Project Path="src/LegacyMonolith/LegacyCommerce.Api/LegacyCommerce.Api.csproj" />
+    <Project Path="src/LegacyMonolith/LegacyCommerce.Application/LegacyCommerce.Application.csproj" />
+    <Project Path="src/LegacyMonolith/LegacyCommerce.Domain/LegacyCommerce.Domain.csproj" />
+    <Project Path="src/LegacyMonolith/LegacyCommerce.Infrastructure/LegacyCommerce.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/" />
+  <Folder Name="/src/Services/Catalog/">
+    <Project Path="src/Services/Catalog/Catalog.Api/Catalog.Api.csproj" />
+    <Project Path="src/Services/Catalog/Catalog.Application/Catalog.Application.csproj" />
+    <Project Path="src/Services/Catalog/Catalog.Domain/Catalog.Domain.csproj" />
+    <Project Path="src/Services/Catalog/Catalog.Infrastructure/Catalog.Infrastructure.csproj" />
+    <Project Path="src/Services/Catalog/Catalog.Migration/Catalog.Migration.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Inventory/">
+    <Project Path="src/Services/Inventory/Inventory.Api/Inventory.Api.csproj" />
+    <Project Path="src/Services/Inventory/Inventory.Application/Inventory.Application.csproj" />
+    <Project Path="src/Services/Inventory/Inventory.Domain/Inventory.Domain.csproj" />
+    <Project Path="src/Services/Inventory/Inventory.Infrastructure/Inventory.Infrastructure.csproj" />
+    <Project Path="src/Services/Inventory/Inventory.Migration/Inventory.Migration.csproj" />
+  </Folder>
+  <Folder Name="/src/Services/Orders/">
+    <Project Path="src/Services/Orders/Orders.Api/Orders.Api.csproj" />
+    <Project Path="src/Services/Orders/Orders.Application/Orders.Application.csproj" />
+    <Project Path="src/Services/Orders/Orders.Domain/Orders.Domain.csproj" />
+    <Project Path="src/Services/Orders/Orders.Infrastructure/Orders.Infrastructure.csproj" />
+    <Project Path="src/Services/Orders/Orders.Migration/Orders.Migration.csproj" />
+  </Folder>
+  <Folder Name="/tests/" />
+  <Folder Name="/tests/IntegrationTests/">
+    <Project Path="tests/IntegrationTests/Inventory.IntegrationTests/Inventory.IntegrationTests.csproj" />
+    <Project Path="tests/IntegrationTests/Orders.IntegrationTests/Orders.IntegrationTests.csproj" />
+    <Project Path="tests/IntegrationTests/StranglerForge.GatewayTests/StranglerForge.GatewayTests.csproj" />
+  </Folder>
+  <Folder Name="/tests/UnitTests/">
+    <Project Path="tests/UnitTests/LegacyCommerce.SmokeTests/LegacyCommerce.SmokeTests.csproj" />
+  </Folder>
+</Solution>

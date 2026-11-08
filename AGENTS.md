@@ -1,0 +1,4 @@
+# Engineering rules
+Write precise professional code, comments, documentation, ADRs, and Conventional Commits. Comments explain non-obvious constraints, not obvious statements. Do not add AI attribution, prompts, or fabricated test history. Preserve legal notices.
+Keep domain code independent of infrastructure. The gateway has no business logic. Services own databases and never query another service store. Integration events are stable contracts. Avoid distributed transactions. Preserve API compatibility and plan rollback around data ownership.
+Apply SOLID, DRY, KISS, explicit dependencies and errors, meaningful naming, asynchronous I/O, and deterministic tests. Avoid speculative interfaces and generic repositories. Inspect the solution, make the smallest coherent change, build, test, fix failures, and update documentation. Implement only the requested phase.
