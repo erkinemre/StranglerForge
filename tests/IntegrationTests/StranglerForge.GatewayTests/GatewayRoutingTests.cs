@@ -145,15 +145,7 @@ public sealed class GatewayRoutingTests
                     ["ReverseProxy:Clusters:legacy:Destinations:monolith:Address"] = destination,
                     ["ReverseProxy:Clusters:catalog:Destinations:service:Address"] = catalogDestination ?? destination,
                     ["ReverseProxy:Clusters:inventory:Destinations:service:Address"] = inventoryDestination ?? destination,
-                    ["ReverseProxy:Clusters:orders:Destinations:service:Address"] = ordersDestination ?? destination,
-                    ["ReverseProxy:Routes:orders:ClusterId"] = ordersDestination is null ? "legacy" : "orders",
-                    ["ReverseProxy:Routes:orderById:ClusterId"] = ordersDestination is null ? "legacy" : "orders",
-                    ["ReverseProxy:Routes:inventory:ClusterId"] = inventoryDestination is null ? "legacy" : "inventory",
-                    ["ReverseProxy:Routes:inventoryStock:ClusterId"] = inventoryDestination is null ? "legacy" : "inventory",
-                    ["ReverseProxy:Routes:reservationCreate:ClusterId"] = inventoryDestination is null ? "legacy" : "inventory",
-                    ["ReverseProxy:Routes:reservationById:ClusterId"] = inventoryDestination is null ? "legacy" : "inventory",
-                    ["ReverseProxy:Routes:reservationRelease:ClusterId"] = inventoryDestination is null ? "legacy" : "inventory",
-                    ["ReverseProxy:Routes:reservationConfirm:ClusterId"] = inventoryDestination is null ? "legacy" : "inventory"
+                    ["ReverseProxy:Clusters:orders:Destinations:service:Address"] = ordersDestination ?? destination
                 })));
 
     private static async Task<WebApplication> StartLegacyAsync(string identity = "legacy")

@@ -28,3 +28,5 @@ logs/
 *.db
 *.tmp
 *.swp
+migration-state.json
+migration-state-test-*.json
