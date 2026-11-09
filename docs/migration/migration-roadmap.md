@@ -19,3 +19,5 @@ flowchart LR
   Gateway --> Orders[Order Service]
   Gateway --> Legacy[Customers, Payments, Notifications]
 ```
+
+Phase 07 adds gateway-local migration state, validated flags, a protected control boundary, read-only Catalog canary/shadow mechanics for pre-cutover use, contract comparison, and explicit rollback blocking for the post-cutover development data. It does not claim live broker or multi-replica validation. Phase 08 has not started.

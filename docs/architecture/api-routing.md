@@ -19,3 +19,7 @@ YARP overwrites X-Forwarded values with the immediate client connection informat
 
 ## Phase 05 Inventory routing
 After the verified development cutover, `inventory`, `inventoryStock`, and four reservation routes target the `inventory` YARP cluster. The monolith uses `InventoryOwnership:Mode=Extracted`. Customer, payment, and notification routes stay on `legacy`; Order create/read routes target `orders`; Catalog routes stay on `catalog`. The isolated end-to-end validation script exercises the extracted setting.
+
+## Phase 07 routing guard
+
+The gateway validates that each state-changing Catalog, Inventory, or Orders route targets its configured authoritative cluster and lifecycle stage. Only `GET /api/products` can use the controlled read canary or shadow path before Catalog cutover. Current post-cutover routes remain modern. See [canary routing](../migration/canary-routing.md) and [shadow execution](../migration/shadow-execution.md).
