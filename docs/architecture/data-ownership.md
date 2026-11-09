@@ -7,3 +7,7 @@ Before Inventory cutover, SQL Server Stock remains authoritative. After a verifi
 
 ## Phase 06 ownership gate
 After the verified 64-row development import, Orders PostgreSQL owns order creation, state, saga progress, and transition events. SQL order rows are historical. The monolith still owns payment attempts and notifications through token-protected HTTP boundaries. See [Order cutover](../migration/orders-cutover.md).
+
+## Phase 07 traffic controls
+
+A gateway flag or migration state does not transfer database ownership. All three extracted PostgreSQL stores have post-cutover writes; SQL Catalog, Inventory, and Orders data is historical. The gateway rejects conflicting writer clusters and reports legacy ownership rollback as ineligible until independently verified reconciliation. See [safe rollback](../migration/safe-rollback.md).

@@ -6,3 +6,5 @@ Inventory route and monolith mode rollback is safe only before PostgreSQL accept
 
 ## Orders rollback gate
 The development Orders cutover imported and verified 64 historical SQL orders, then accepted new PostgreSQL orders. SQL remains at 64 historical rows. A route-only rollback would hide the new Orders and may duplicate payment or reservation work. Reconcile each new order, saga state, Inventory reservation, payment attempt, and notification before changing the authoritative writer. See [Order cutover](orders-cutover.md).
+
+Phase 07 implements [rollback eligibility](safe-rollback.md) in the gateway. Current development Catalog, Inventory, and Orders ownership rollback is blocked because PostgreSQL has accepted new writes and SQL reconciliation is unverified. Deployment rollback that retains modern data ownership is a separate operation.
