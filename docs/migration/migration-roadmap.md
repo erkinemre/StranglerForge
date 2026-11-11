@@ -11,7 +11,7 @@
 9. Containers, Kubernetes, and broad deployment tests.
 10. Final cutover.
 
-Phases 01–07 are implemented; Phase 07 was merged to `main` as PR #1. Phase 08 was merged to `main` as PR #2. Phase 09 is implemented on `feature/phase-09-cloud-native-deployment` and awaits CI and runtime qualification. The gateway can use a dedicated PostgreSQL migration authority for multi-instance state and configuration revisions. HTTP resilience, telemetry, dashboards, and development fault hooks are added without changing database ownership. All 77 solution tests and the isolated live PostgreSQL authority test passed. Docker and RabbitMQ runtime checks remain deferred because Docker is absent in this environment. Phase 10 has not started.
+Phases 01–07 are implemented; Phase 07 was merged to `main` as PR #1. Phase 08 was merged to `main` as PR #2. Phase 09 is implemented on `feature/phase-09-cloud-native-deployment` with CI validation passed; Kubernetes cluster runtime qualification remains open. The gateway can use a dedicated PostgreSQL migration authority for multi-instance state and configuration revisions. HTTP resilience, telemetry, dashboards, and development fault hooks are added without changing database ownership. All 77 solution tests and the isolated live PostgreSQL authority test passed. Docker and RabbitMQ runtime checks remain deferred because Docker is absent in this environment. Phase 10 has not started.
 
 ```mermaid
 flowchart LR
