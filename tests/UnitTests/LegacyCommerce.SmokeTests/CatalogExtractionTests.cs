@@ -34,6 +34,7 @@ public sealed class CatalogExtractionTests
         var catalogDb = catalogScope.ServiceProvider.GetRequiredService<CatalogDb>();
         var legacyDb = legacyScope.ServiceProvider.GetRequiredService<CommerceDb>();
         await catalogDb.Database.MigrateAsync();
+        await legacyDb.Database.MigrateAsync();
         var catalogClient = catalogFactory.CreateClient();
         var legacyClient = legacyFactory.CreateClient();
         var invalid = new { name = "", price = 0m };
