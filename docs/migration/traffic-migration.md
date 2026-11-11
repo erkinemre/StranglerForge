@@ -67,3 +67,6 @@ flowchart TD
 ```
 
 The current development state is ineligible for legacy data ownership rollback: post-cutover writes exist in all three PostgreSQL stores and no verified reconciliation checkpoint is recorded. The API reports this explicitly. Operators must inspect active Order sagas, uncertain payments, Inventory reservations, outbox delivery, database synchronization gaps, and legacy schema compatibility before considering a future transfer. Deployment or gateway version rollback that keeps modern ownership is a separate operation. The gateway does not reconcile data or change owners automatically.
+
+
+Phase 08 extends this Phase 07 file-mode design with a [dedicated PostgreSQL authority](../architecture/multi-instance-coordination.md) for replica deployments. In shared mode, API requests hold a read lock through forwarding and state transitions hold an exclusive lock. Stale configuration or authority unavailability returns 503. The original file mode remains for one-instance development.

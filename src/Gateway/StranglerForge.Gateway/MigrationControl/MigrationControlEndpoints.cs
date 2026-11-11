@@ -14,6 +14,16 @@ public static class MigrationControlEndpoints
             var config = context.RequestServices.GetRequiredService<IConfiguration>();
             var authorization = MigrationAdminAuthorization.Check(context, config);
             if (authorization != StatusCodes.Status200OK) return Results.StatusCode(authorization);
+            if (!context.Request.Path.Equals("/internal/migration/config/activate", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var states = context.RequestServices.GetRequiredService<MigrationStateStore>();
+                    await using var lease = await states.GuardAsync(MigrationFlagReader.Read(config), context.RequestAborted);
+                }
+                catch (Exception error) when (error is Npgsql.NpgsqlException or InvalidOperationException or TimeoutException)
+                { return Results.StatusCode(503); }
+            }
             return await next(invocation);
         });
         group.MapGet("/status", (MigrationStateStore states, IConfiguration config) =>
@@ -21,7 +31,7 @@ public static class MigrationControlEndpoints
             try
             {
                 var flags = MigrationFlagReader.Read(config);
-                return Results.Ok(Enum.GetValues<MigrationService>().Select(service => new { service, state = states.Get(service), flags = flags.For(service), rollback = states.Evaluate(service, flags) }));
+                return Results.Ok(new { revision = states.SharedRevision, services = Enum.GetValues<MigrationService>().Select(service => new { service, state = states.Get(service), flags = flags.For(service), rollback = states.Evaluate(service, flags) }) });
             }
             catch (Exception error) when (error is InvalidOperationException or FormatException) { return Results.Problem("Migration configuration is invalid.", statusCode: 503); }
         });
@@ -44,6 +54,17 @@ public static class MigrationControlEndpoints
             try { return Results.Ok(states.Evaluate(service, MigrationFlagReader.Read(config))); }
             catch (Exception error) when (error is InvalidOperationException or FormatException) { return Results.Problem("Migration configuration is invalid.", statusCode: 503); }
         });
+        group.MapPost("/config/activate", async (ConfigurationActivation request, HttpContext context, MigrationStateStore states, IConfiguration config, CancellationToken ct) =>
+        {
+            try
+            {
+                var flags = MigrationFlagReader.Read(config);
+                var revision = await states.ActivateConfigurationAsync(flags, request.ExpectedRevision, "local-admin", context.Request.Headers["X-Correlation-ID"].ToString(), ct);
+                return revision is null ? Results.Conflict(new { error = "Shared configuration revision changed or shared authority is disabled." }) : Results.Ok(new { revision });
+            }
+            catch (Exception error) when (error is Npgsql.NpgsqlException or InvalidOperationException or TimeoutException)
+            { return Results.Problem("Migration authority unavailable.", statusCode: 503); }
+        });
         group.MapGet("/comparisons", (MigrationDiagnostics diagnostics) => Results.Ok(diagnostics.Snapshot()));
         group.MapGet("/audit", (MigrationStateStore states) => Results.Ok(states.Audit));
         group.MapPost("/{service}/transitions", async (MigrationService service, TransitionRequest request, HttpContext context, MigrationStateStore states, MigrationDiagnostics diagnostics, IConfiguration config, ILoggerFactory loggerFactory, CancellationToken ct) =>
@@ -61,6 +82,7 @@ public static class MigrationControlEndpoints
     }
 }
 
+public sealed record ConfigurationActivation(long ExpectedRevision);
 public static class MigrationAdminAuthorization
 {
     public static int Check(HttpContext context, IConfiguration config)

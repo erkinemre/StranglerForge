@@ -228,6 +228,8 @@ public sealed class MigrationControlTests
         {
             ["MigrationControl:Catalog:Owner"] = "Legacy",
             ["MigrationControl:Catalog:ModernReadPercent"] = percentage.ToString(),
+            ["MigrationControl:Catalog:Checkpoint"] = "fixture-verified",
+            ["MigrationControl:Catalog:WritesSinceCheckpoint"] = "false",
             ["MigrationControl:Catalog:LegacyReadAvailable"] = "true",
             ["MigrationControl:StateFile"] = stateFile,
             ["ReverseProxy:Clusters:legacy:Destinations:monolith:Address"] = legacy.Urls.Single(),
@@ -279,6 +281,70 @@ public sealed class MigrationControlTests
         var config = Configuration();
         config["MigrationControl:NormalizedFields:0"] = "price";
         Assert.Throws<InvalidOperationException>(() => MigrationFlagReader.Read(config));
+    }
+    [Fact]
+    public async Task ModernCatalogListStreamsBeyondShadowComparisonLimit()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        await using var catalog = builder.Build();
+        var payload = new string('x', 300_000);
+        catalog.MapGet("/api/products", () => Results.Text(payload));
+        await catalog.StartAsync();
+        await using var gateway = new WebApplicationFactory<GatewayProgram>().WithWebHostBuilder(host => host.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["ReverseProxy:Clusters:catalog:Destinations:service:Address"] = catalog.Urls.Single()
+        })));
+        using var response = await gateway.CreateClient().GetAsync("/api/products");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(payload.Length, (await response.Content.ReadAsStringAsync()).Length);
+    }
+
+    [Fact]
+    public async Task ShadowValidationKeepsLegacyAsPrimaryAtFullModernPercentage()
+    {
+        await using var legacy = await StartCatalogAsync("legacy", 12);
+        await using var modern = await StartCatalogAsync("modern", 13);
+        var stateFile = "migration-state-test-" + Guid.NewGuid().ToString("N") + ".json";
+        await using var gateway = new WebApplicationFactory<GatewayProgram>().WithWebHostBuilder(host => host.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["MigrationControl:Catalog:Owner"] = "Legacy",
+            ["MigrationControl:Catalog:ModernReadPercent"] = "100",
+            ["MigrationControl:Catalog:LegacyReadAvailable"] = "true",
+            ["MigrationControl:StateFile"] = stateFile,
+            ["ReverseProxy:Clusters:legacy:Destinations:monolith:Address"] = legacy.Urls.Single(),
+            ["ReverseProxy:Clusters:catalog:Destinations:service:Address"] = modern.Urls.Single(),
+            ["ReverseProxy:Routes:catalog:ClusterId"] = "legacy"
+        })));
+        var path = Path.Combine(gateway.Server.Services.GetRequiredService<IHostEnvironment>().ContentRootPath, stateFile);
+        try
+        {
+            var store = gateway.Services.GetRequiredService<MigrationStateStore>();
+            var flags = MigrationFlagReader.Read(gateway.Services.GetRequiredService<IConfiguration>());
+            Assert.True((await store.TransitionAsync(MigrationService.Catalog, new(MigrationStage.ShadowValidation, 0), flags, "test", "", CancellationToken.None)).Succeeded);
+            using var response = await gateway.CreateClient().GetAsync("/api/products");
+            Assert.Equal("legacy", response.Headers.GetValues("X-Legacy").Single());
+        }
+        finally { if (File.Exists(path)) File.Delete(path); }
+    }
+    [Fact]
+    public async Task CanaryTransitionRequiresAWriteFreeCheckpoint()
+    {
+        var root = Path.Combine(AppContext.BaseDirectory, "migration-state-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var config = Configuration(DataOwner.Legacy);
+            config["MigrationControl:Catalog:LegacyReadAvailable"] = "true";
+            var states = new MigrationStateStore(new TestEnvironment(root), config);
+            var flags = MigrationFlagReader.Read(config);
+            Assert.True((await states.TransitionAsync(MigrationService.Catalog, new(MigrationStage.ShadowValidation, 0), flags, "test", "", CancellationToken.None)).Succeeded);
+            Assert.False((await states.TransitionAsync(MigrationService.Catalog, new(MigrationStage.CanaryReady, 1), flags, "test", "", CancellationToken.None)).Succeeded);
+            config["MigrationControl:Catalog:Checkpoint"] = "verified";
+            config["MigrationControl:Catalog:WritesSinceCheckpoint"] = "false";
+            Assert.True((await states.TransitionAsync(MigrationService.Catalog, new(MigrationStage.CanaryReady, 1), MigrationFlagReader.Read(config), "test", "", CancellationToken.None)).Succeeded);
+        }
+        finally { Directory.Delete(root, true); }
     }
     [Fact]
     public void PreCutoverLegacyStateCanBeEligibleButModernStateCannot()

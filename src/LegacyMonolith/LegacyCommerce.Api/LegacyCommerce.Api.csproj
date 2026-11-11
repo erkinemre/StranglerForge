@@ -11,12 +11,14 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\LegacyCommerce.Domain\LegacyCommerce.Domain.csproj" />
     <ProjectReference Include="..\LegacyCommerce.Application\LegacyCommerce.Application.csproj" />
     <ProjectReference Include="..\LegacyCommerce.Infrastructure\LegacyCommerce.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\BuildingBlocks\StranglerForge.Observability\StranglerForge.Observability.csproj" />
   </ItemGroup>
 
 </Project>

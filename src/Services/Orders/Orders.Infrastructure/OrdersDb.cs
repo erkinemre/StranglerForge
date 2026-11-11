@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using Microsoft.Extensions.Logging;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +28,8 @@ public sealed class OrdersDb(DbContextOptions<OrdersDb> options) : DbContext(opt
 
 public sealed class EfOrderStore(OrdersDb db, IPublishEndpoint publisher, ILogger<EfOrderStore> logger) : IOrderStore
 {
+    private static readonly Meter Meter = new("StranglerForge.Orders");
+    private static readonly Counter<long> Transitions = Meter.CreateCounter<long>("stranglerforge.orders.transitions");
     public Task<Order?> FindAsync(Guid id, CancellationToken ct) => db.Orders.AsNoTracking().SingleOrDefaultAsync(x => x.Id == id, ct);
     public Task<OrderSaga?> FindSagaAsync(Guid id, CancellationToken ct) => db.Sagas.AsNoTracking().SingleOrDefaultAsync(x => x.OrderId == id, ct);
     public async Task<bool> TryInsertAsync(Order order, OrderSaga saga, CancellationToken ct)
@@ -49,7 +52,7 @@ public sealed class EfOrderStore(OrdersDb db, IPublishEndpoint publisher, ILogge
         var sagaChanged = await db.Sagas.Where(x => x.OrderId == id && x.State == expected).ExecuteUpdateAsync(s => s.SetProperty(x => x.State, next).SetProperty(x => x.UpdatedAtUtc, DateTime.UtcNow).SetProperty(x => x.LastError, reason).SetProperty(x => x.Attempts, x => x.Attempts + 1), ct);
         if (sagaChanged != 1) throw new InvalidOperationException("Order and saga state diverged.");
         await publisher.Publish(new OrderTransitionedV1(Guid.NewGuid(), correlationId, id, next.ToString(), DateTime.UtcNow), ct);
-        await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); logger.LogInformation("Order {OrderId} moved from {PreviousStatus} to {NextStatus} with correlation {CorrelationId}; reason {Reason}", id, expected, next, correlationId, reason); return true;
+        await db.SaveChangesAsync(ct); await tx.CommitAsync(ct); Transitions.Add(1, new KeyValuePair<string, object?>("state", next.ToString())); logger.LogInformation("Order {OrderId} moved from {PreviousStatus} to {NextStatus} with correlation {CorrelationId}; reason {Reason}", id, expected, next, correlationId, reason); return true;
     }
     public async Task<IReadOnlyList<Guid>> PendingSagaIdsAsync(int limit, CancellationToken ct) => await db.Sagas.AsNoTracking().Where(x => x.State == OrderStatus.Submitted || x.State == OrderStatus.InventoryPending || x.State == OrderStatus.InventoryReserved || x.State == OrderStatus.PaymentAuthorized || x.State == OrderStatus.CompensationPending || (x.State == OrderStatus.PaymentPending && x.PaymentDecision != null && x.LastError != "Payment outcome uncertain; manual review required") || ((x.State == OrderStatus.Confirmed || x.State == OrderStatus.Cancelled || x.State == OrderStatus.Failed) && !x.NotificationRecorded)).OrderBy(x => x.UpdatedAtUtc).Select(x => x.OrderId).Take(limit).ToListAsync(ct);
     public async Task NoteRetryAsync(Guid id, string reason, CancellationToken ct) => _ = await db.Sagas.Where(x => x.OrderId == id).ExecuteUpdateAsync(s => s.SetProperty(x => x.UpdatedAtUtc, DateTime.UtcNow).SetProperty(x => x.LastError, reason).SetProperty(x => x.Attempts, x => x.Attempts + 1), ct);

@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using StranglerForge.Orders.Domain;
 
 namespace StranglerForge.Orders.Application;
@@ -31,8 +33,12 @@ public enum PaymentOutcome { Authorized, Rejected, Uncertain }
 public sealed class DependencyUnavailableException(string message, Exception? inner = null) : Exception(message, inner);
 public sealed class OrderCommands(IOrderStore store, IOrderDependencies dependencies)
 {
+    private static readonly ActivitySource Traces = new("StranglerForge.Orders.Application");
+    private static readonly Meter Meter = new("StranglerForge.Orders");
+    private static readonly Counter<long> Submitted = Meter.CreateCounter<long>("stranglerforge.orders.submitted");
     public async Task<(OrderSnapshot? Order, string? Error)> SubmitAsync(SubmitOrder command, CancellationToken ct)
     {
+        using var activity = Traces.StartActivity("order.submit");
         if (command.CustomerId == Guid.Empty || command.ProductId == Guid.Empty || command.Quantity <= 0 || command.OrderId == Guid.Empty) return (null, "Invalid order.");
         var id = command.OrderId ?? Guid.NewGuid();
         var existing = await store.FindAsync(id, ct);
@@ -47,6 +53,7 @@ public sealed class OrderCommands(IOrderStore store, IOrderDependencies dependen
             existing = await store.FindAsync(id, ct);
             return existing?.Matches(command.CustomerId, command.ProductId, command.Quantity) == true ? (Snapshot(existing), null) : (null, "Idempotency key belongs to another order.");
         }
+        Submitted.Add(1);
         return (Snapshot(order), null);
     }
     public async Task<OrderSnapshot?> GetAsync(Guid id, CancellationToken ct) => await store.FindAsync(id, ct) is { } order ? Snapshot(order) : null;

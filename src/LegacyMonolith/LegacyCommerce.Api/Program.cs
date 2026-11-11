@@ -1,6 +1,10 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using StranglerForge.Observability;
 var builder = WebApplication.CreateBuilder(args);
-builder.Logging.AddJsonConsole();
-builder.Services.AddHealthChecks();
+builder.Services.AddStranglerForgeTelemetry(builder.Configuration, builder.Environment, "legacycommerce-monolith");
+builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
+builder.Services.AddHealthChecks().AddCheck<LegacyDatabaseHealthCheck>("legacy-database");
 var connection = builder.Configuration.GetConnectionString("LegacyCommerce")
     ?? throw new InvalidOperationException("ConnectionStrings:LegacyCommerce is required.");
 builder.Services.AddCommerceInfrastructure(connection);
@@ -16,8 +20,8 @@ else if (catalogMode == "Extracted")
     builder.Services.AddHttpClient<IProductCatalog, CatalogHttpProductReader>(client =>
     {
         client.BaseAddress = new Uri(catalogUrl, UriKind.Absolute);
-        client.Timeout = TimeSpan.FromSeconds(3);
-    });
+        client.Timeout = TimeSpan.FromSeconds(7);
+    }).AddSafeReadResilience();
 }
 else throw new InvalidOperationException("CatalogOwnership:Mode must be Legacy, ReadOnly, or Extracted.");
 var inventoryMode = builder.Configuration["InventoryOwnership:Mode"] ?? "Legacy";
@@ -25,7 +29,7 @@ if (inventoryMode == "Legacy") builder.Services.AddScoped<IInventoryGateway, Leg
 else if (inventoryMode == "Extracted")
 {
     var inventoryUrl = builder.Configuration["InventoryService:BaseUrl"] ?? throw new InvalidOperationException("InventoryService:BaseUrl is required.");
-    builder.Services.AddHttpClient<IInventoryGateway, InventoryHttpGateway>(client => { client.BaseAddress = new Uri(inventoryUrl); client.Timeout = TimeSpan.FromSeconds(3); });
+    builder.Services.AddHttpClient<IInventoryGateway, InventoryHttpGateway>(client => { client.BaseAddress = new Uri(inventoryUrl); client.Timeout = TimeSpan.FromSeconds(7); }).AddSafeReadResilience();
 }
 else throw new InvalidOperationException("InventoryOwnership:Mode must be Legacy or Extracted.");
 builder.Services.AddScoped<ICorrelationIdAccessor, CorrelationIdAccessor>();
@@ -38,7 +42,7 @@ builder.Services.AddScoped<ExternalOrderBoundary>();
 if (builder.Configuration["OrdersOwnership:Mode"] == "Extracted")
 {
     var ordersUrl = builder.Configuration["OrdersService:BaseUrl"] ?? throw new InvalidOperationException("OrdersService:BaseUrl required.");
-    builder.Services.AddHttpClient<IExtractedOrderPayment, ExtractedOrderPaymentGateway>(client => { client.BaseAddress = new Uri(ordersUrl); client.Timeout = TimeSpan.FromSeconds(5); });
+    builder.Services.AddHttpClient<IExtractedOrderPayment, ExtractedOrderPaymentGateway>(client => { client.BaseAddress = new Uri(ordersUrl); client.Timeout = TimeSpan.FromSeconds(7); }).AddSafeReadResilience();
 }
 builder.Services.AddScoped<DispatchNotificationHandler>();
 builder.Services.AddScoped<CommerceQueries>();
@@ -50,6 +54,7 @@ app.Use(async (context, next) =>
     var correlationId = Guid.TryParse(incoming, out var parsed) ? parsed.ToString("D") : Guid.NewGuid().ToString("D");
     context.RequestServices.GetRequiredService<ICorrelationIdAccessor>().CorrelationId = correlationId;
     context.Response.Headers["X-Correlation-ID"] = correlationId;
+    using var scope = app.Logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId, ["ServiceName"] = "legacycommerce-monolith" });
     try
     {
         await next(context);
@@ -63,7 +68,10 @@ app.Use(async (context, next) =>
         await context.Response.WriteAsJsonAsync(new { title = "Dependency unavailable", status = 503 });
     }
 });
+app.UseDevelopmentFaultInjection(app.Environment, app.Configuration);
 app.MapHealthChecks("/health");
+app.MapGet("/health/live", () => Results.Ok());
+app.MapHealthChecks("/health/ready");
 app.MapGet("/", () => Results.Ok(new { name = "LegacyCommerce", phase = 2 }));
 app.MapCustomersEndpoints();
 app.MapCatalogEndpoints();
@@ -101,3 +109,9 @@ public static bool Allowed(HttpContext context)
     var supplied = context.Request.Headers["X-Orders-Internal-Token"].ToString();
     return !string.IsNullOrWhiteSpace(expected) && !string.IsNullOrWhiteSpace(supplied) && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(expected), System.Text.Encoding.UTF8.GetBytes(supplied));
 }}
+
+public sealed class LegacyDatabaseHealthCheck(CommerceDb db) : IHealthCheck
+{
+    public async Task<HealthCheckResult> CheckHealthAsync(HealthCheckContext context, CancellationToken ct = default) =>
+        await db.Database.CanConnectAsync(ct) ? HealthCheckResult.Healthy() : HealthCheckResult.Unhealthy("Legacy SQL Server unavailable.");
+}

@@ -1,0 +1,221 @@
+{
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "version": 1,
+  "panels": [
+    {
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      },
+      "title": "Pending outbox records",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "id": 1,
+      "gridPos": {
+        "y": 0.0,
+        "x": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (stranglerforge_outbox_pending)",
+          "legendFormat": "{{service_name}} {{state}} {{kind}} {{outcome}} {{queue}} {{event_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      },
+      "title": "Oldest outbox age",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "id": 2,
+      "gridPos": {
+        "y": 0.0,
+        "x": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "max by (service) (stranglerforge_outbox_oldest_age_seconds)",
+          "legendFormat": "{{service_name}} {{state}} {{kind}} {{outcome}} {{queue}} {{event_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      },
+      "title": "Ready broker messages",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "id": 3,
+      "gridPos": {
+        "y": 8.0,
+        "x": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (queue) (rabbitmq_detailed_queue_messages_ready)",
+          "legendFormat": "{{service_name}} {{state}} {{kind}} {{outcome}} {{queue}} {{event_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      },
+      "title": "Broker consumers",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "id": 4,
+      "gridPos": {
+        "y": 8.0,
+        "x": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (queue) (rabbitmq_detailed_queue_consumers)",
+          "legendFormat": "{{service_name}} {{state}} {{kind}} {{outcome}} {{queue}} {{event_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Consumer processing failures",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "h": 8,
+        "w": 12,
+        "y": 16.0
+      },
+      "targets": [
+        {
+          "legendFormat": "{{service}} {{state}} {{queue}}",
+          "refId": "A",
+          "expr": "sum by (service) (rate(stranglerforge_consumer_failures_total[5m]))"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Error queue ready",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "h": 8,
+        "w": 12,
+        "y": 16.0
+      },
+      "targets": [
+        {
+          "legendFormat": "{{service}} {{state}} {{queue}}",
+          "refId": "A",
+          "expr": "sum(rabbitmq_detailed_queue_messages_ready{queue=~\".*_error\"})"
+        }
+      ],
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      }
+    }
+  ],
+  "tags": [
+    "stranglerforge",
+    "phase-08"
+  ],
+  "title": "RabbitMQ and Outbox",
+  "refresh": "15s",
+  "uid": "sf-messaging",
+  "schemaVersion": 41
+}

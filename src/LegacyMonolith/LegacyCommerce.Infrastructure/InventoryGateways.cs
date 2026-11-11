@@ -1,3 +1,5 @@
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
@@ -36,7 +38,7 @@ public sealed class InventoryHttpGateway(HttpClient client, ICorrelationIdAccess
             await EnsureSuccess(response);
             return true;
         }
-        catch (InventoryUnavailableException exception) when (exception.InnerException is TaskCanceledException or HttpRequestException)
+        catch (InventoryUnavailableException exception) when (exception.InnerException is TaskCanceledException or HttpRequestException or TimeoutRejectedException)
         {
             logger.LogWarning(exception, "Reconciling ambiguous reservation {ReservationId}", reservationId);
             using var lookup = await SendAsync(HttpMethod.Get, $"api/inventory/reservations/{reservationId}", null, ct);
@@ -68,7 +70,7 @@ public sealed class InventoryHttpGateway(HttpClient client, ICorrelationIdAccess
         if (body is not null) request.Content = JsonContent.Create(body);
         if (!string.IsNullOrWhiteSpace(correlation.CorrelationId)) request.Headers.TryAddWithoutValidation("X-Correlation-ID", correlation.CorrelationId);
         try { return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct); }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        catch (Exception exception) when (exception is HttpRequestException or BrokenCircuitException or TimeoutRejectedException or TaskCanceledException && !ct.IsCancellationRequested)
         { throw new InventoryUnavailableException("Inventory service is unavailable.", exception); }
     }
     private static async Task EnsureSuccess(HttpResponseMessage response)

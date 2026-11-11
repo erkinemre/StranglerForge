@@ -1,17 +1,23 @@
+using StranglerForge.Observability;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using StranglerForge.Orders.Application;
 using StranglerForge.Orders.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Logging.AddJsonConsole();
+builder.Services.AddStranglerForgeTelemetry(builder.Configuration, builder.Environment, "orders-service");
+builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
 builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 var connection = builder.Configuration.GetConnectionString("Orders") ?? throw new InvalidOperationException("ConnectionStrings:Orders required.");
 builder.Services.AddOrdersInfrastructure(connection);
+builder.Services.AddOutboxMetrics<OrdersDb>("orders");
 builder.Services.AddScoped<OrderCommands>();
 builder.Services.AddScoped<OrderSagaRunner>();
-builder.Services.AddHttpClient<IOrderDependencies, HttpOrderDependencies>(client => client.Timeout = TimeSpan.FromSeconds(5));
+builder.Services.AddScoped<IOrderDependencies, HttpOrderDependencies>();
+foreach (var dependency in new[] { "orders-legacy", "orders-catalog", "orders-inventory" })
+    builder.Services.AddHttpClient(dependency, client => client.Timeout = TimeSpan.FromSeconds(7)).AddSafeReadResilience();
 builder.Services.AddHostedService<OrderSagaWorker>();
+builder.Services.AddHostedService<SagaMetricsWorker>();
 builder.Services.AddHealthChecks().AddCheck<OrdersHealthCheck>("orders-database");
 builder.Services.AddMassTransit(x =>
 {
@@ -34,10 +40,13 @@ app.Use(async (context, next) =>
     context.Response.Headers["X-Correlation-ID"] = correlation.ToString("D");
     context.Request.Headers["X-Correlation-ID"] = correlation.ToString("D");
     try { await next(context); }
-    catch (DependencyUnavailableException error) { app.Logger.LogWarning(error, "Order dependency unavailable for {Path}", context.Request.Path); if (!context.Response.HasStarted) { context.Response.StatusCode = 503; await context.Response.WriteAsJsonAsync(new { title = "Dependency unavailable", status = 503 }); } }
+    catch (DependencyUnavailableException error) { Telemetry.DependencyFailures.Add(1, new KeyValuePair<string, object?>("service", "orders")); app.Logger.LogWarning(error, "Order dependency unavailable for {Path}", context.Request.Path); if (!context.Response.HasStarted) { context.Response.StatusCode = 503; await context.Response.WriteAsJsonAsync(new { title = "Dependency unavailable", status = 503 }); } }
 });
+app.UseDevelopmentFaultInjection(app.Environment, app.Configuration);
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions { Predicate = check => check.Name == "orders-database" });
 app.MapHealthChecks("/health/messaging");
+app.MapGet("/health/live", () => Results.Ok());
+app.MapHealthChecks("/health/ready");
 app.MapPost("/api/orders", async (OrderInput input, OrderCommands commands, HttpContext context, CancellationToken ct) =>
 {
     var supplied = context.Request.Headers["Idempotency-Key"].ToString();
@@ -71,13 +80,14 @@ public static class OrdersInternalAuthorization
         return !string.IsNullOrWhiteSpace(expected) && !string.IsNullOrWhiteSpace(supplied) && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(expected), System.Text.Encoding.UTF8.GetBytes(supplied));
     }
 }
-public sealed class OrderSagaWorker(IServiceScopeFactory scopeFactory, ILogger<OrderSagaWorker> logger) : BackgroundService
+public sealed class OrderSagaWorker(IServiceScopeFactory scopeFactory, ILogger<OrderSagaWorker> logger, IConfiguration configuration, IHostEnvironment environment) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
+            if (environment.IsDevelopment() && configuration.GetValue<bool>("FaultInjection:PauseSagaWorker")) continue;
             try { using var scope = scopeFactory.CreateScope(); await scope.ServiceProvider.GetRequiredService<OrderSagaRunner>().RunPendingAsync(stoppingToken); }
             catch (Exception error) when (error is not OperationCanceledException) { logger.LogError(error, "Order saga polling failed"); }
         }
@@ -89,12 +99,23 @@ public sealed class OrdersHealthCheck(OrdersDb db) : Microsoft.Extensions.Diagno
     public async Task<Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult> CheckHealthAsync(Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckContext context, CancellationToken ct = default) =>
         await db.Database.CanConnectAsync(ct) ? Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy() : Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy("Orders PostgreSQL unavailable.");
 }
-public sealed class OrderTransitionAuditConsumer(OrdersDb db, ILogger<OrderTransitionAuditConsumer> logger) : IConsumer<OrderTransitionedV1>
+public sealed class OrderTransitionAuditConsumer(OrdersDb db, ILogger<OrderTransitionAuditConsumer> logger, IConfiguration configuration, IHostEnvironment environment) : IConsumer<OrderTransitionedV1>
 {
     public async Task Consume(ConsumeContext<OrderTransitionedV1> context)
     {
-        var message = context.Message;
-        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"OrderEventAudit\" (\"EventId\", \"OrderId\", \"CorrelationId\", \"Status\", \"OccurredAtUtc\") VALUES ({message.EventId}, {message.OrderId}, {message.CorrelationId}, {message.Status}, {message.OccurredAtUtc}) ON CONFLICT (\"EventId\") DO NOTHING", context.CancellationToken);
-        logger.LogInformation("Consumed order transition {EventId} for order {OrderId} status {Status}", message.EventId, message.OrderId, message.Status);
+        try
+        {
+            if (environment.IsDevelopment() && configuration.GetValue<bool>("FaultInjection:FailOrderAuditConsumer"))
+                throw new InvalidOperationException("Development fault injection: order audit consumer failure.");
+            var message = context.Message;
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"OrderEventAudit\" (\"EventId\", \"OrderId\", \"CorrelationId\", \"Status\", \"OccurredAtUtc\") VALUES ({message.EventId}, {message.OrderId}, {message.CorrelationId}, {message.Status}, {message.OccurredAtUtc}) ON CONFLICT (\"EventId\") DO NOTHING", context.CancellationToken);
+            Telemetry.ConsumerProcessed.Add(1, new KeyValuePair<string, object?>("service", "orders"));
+            logger.LogInformation("Consumed order transition {EventId} for order {OrderId} status {Status}", message.EventId, message.OrderId, message.Status);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            Telemetry.ConsumerFailures.Add(1, new KeyValuePair<string, object?>("service", "orders"));
+            throw;
+        }
     }
 }

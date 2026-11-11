@@ -14,14 +14,17 @@ public sealed class MigrationStateStore
     private readonly SemaphoreSlim gate = new(1, 1);
     private readonly string path;
     private MigrationSnapshot snapshot;
+    private readonly PostgresMigrationAuthority? authority;
+    private long sharedRevision;
 
-    public MigrationStateStore(IHostEnvironment environment, IConfiguration configuration)
+    public MigrationStateStore(IHostEnvironment environment, IConfiguration configuration, PostgresMigrationAuthority? authority = null)
     {
+        this.authority = authority;
         var root = Path.GetFullPath(environment.ContentRootPath);
         path = Path.GetFullPath(Path.Combine(root, configuration["MigrationControl:StateFile"] ?? "migration-state.json"));
         if (!path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Migration state file must remain inside the gateway content root.");
-        snapshot = File.Exists(path)
+        snapshot = authority is null && File.Exists(path)
             ? JsonSerializer.Deserialize<MigrationSnapshot>(File.ReadAllText(path)) ?? throw new InvalidOperationException("Migration state file is invalid.")
             : new(new Dictionary<MigrationService, ServiceMigrationState>
             {
@@ -33,8 +36,20 @@ public sealed class MigrationStateStore
             throw new InvalidOperationException("Migration state file is incomplete.");
     }
 
-    public ServiceMigrationState Get(MigrationService service) => snapshot.Services[service];
+    public ServiceMigrationState Get(MigrationService service) => Volatile.Read(ref snapshot).Services[service];
+    public async Task<MigrationAuthorityLease?> GuardAsync(MigrationFlags flags, CancellationToken ct)
+    {
+        if (authority is null) return null;
+        var lease = await authority.AcquireAsync(snapshot, flags, false, ct);
+        Volatile.Write(ref snapshot, lease.Snapshot);
+        Interlocked.Exchange(ref sharedRevision, lease.Revision);
+        return lease;
+    }
+    public Task<long?> ActivateConfigurationAsync(MigrationFlags flags, long expectedRevision, string actor, string correlationId, CancellationToken ct) =>
+        authority?.ActivateConfigurationAsync(snapshot, flags, expectedRevision, actor, correlationId, ct)
+        ?? Task.FromResult<long?>(null);
     public IReadOnlyList<MigrationAudit> Audit => snapshot.Audit.AsReadOnly();
+    public long SharedRevision => Interlocked.Read(ref sharedRevision);
 
     public RollbackEligibility Evaluate(MigrationService service, MigrationFlags flags)
     {
@@ -57,8 +72,15 @@ public sealed class MigrationStateStore
     public async Task<TransitionResult> TransitionAsync(MigrationService service, TransitionRequest request, MigrationFlags flags, string actor, string correlationId, CancellationToken ct)
     {
         await gate.WaitAsync(ct);
+        MigrationAuthorityLease? lease = null;
         try
         {
+            if (authority is not null)
+            {
+                lease = await authority.AcquireAsync(snapshot, flags, true, ct);
+                Volatile.Write(ref snapshot, lease.Snapshot);
+                Interlocked.Exchange(ref sharedRevision, lease.Revision);
+            }
             var current = snapshot.Services[service];
             if (request.ExpectedVersion != current.Version) return new(false, "Migration state changed; reload and retry with the current version.", current);
             var allowed = (current.Stage, request.Target) switch
@@ -75,6 +97,8 @@ public sealed class MigrationStateStore
             if (!allowed) return new(false, "The requested migration transition is not permitted.", current);
             if ((request.Target is MigrationStage.LegacyActive or MigrationStage.ShadowValidation or MigrationStage.CanaryReady) && flags.For(service).Owner != DataOwner.Legacy)
                 return new(false, "Legacy reads require verified legacy data ownership.", current);
+            if (request.Target == MigrationStage.CanaryReady && (string.IsNullOrWhiteSpace(flags.For(service).Checkpoint) || flags.For(service).WritesSinceCheckpoint))
+                return new(false, "Canary reads require a verified checkpoint with no subsequent legacy writes.", current);
             if (request.Target == MigrationStage.ModernActive && flags.For(service).Owner != DataOwner.Modern)
                 return new(false, "ModernActive requires modern data ownership and an external cutover checkpoint.", current);
             if (request.Target == MigrationStage.LegacyActive && !Evaluate(service, flags).Eligible)
@@ -84,6 +108,13 @@ public sealed class MigrationStateStore
             var audit = new List<MigrationAudit>(snapshot.Audit) { new(DateTime.UtcNow, service, current.Stage, next.Stage, next.Version, actor, correlationId) };
             if (audit.Count > 1000) audit.RemoveRange(0, audit.Count - 1000);
             var updated = new MigrationSnapshot(services, audit);
+            if (lease is not null)
+            {
+                await lease.CommitAsync(updated, ct);
+                Volatile.Write(ref snapshot, updated);
+                Interlocked.Exchange(ref sharedRevision, lease.Revision + 1);
+                return new(true, null, next);
+            }
             var temporary = path + ".tmp";
             try
             {
@@ -94,6 +125,10 @@ public sealed class MigrationStateStore
             snapshot = updated;
             return new(true, null, next);
         }
-        finally { gate.Release(); }
+        finally
+        {
+            if (lease is not null) await lease.DisposeAsync();
+            gate.Release();
+        }
     }
 }

@@ -1,3 +1,5 @@
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
 
@@ -15,6 +17,8 @@ public sealed class ExtractedOrderPaymentGateway(HttpClient client, IConfigurati
             return ((int)response.StatusCode, await response.Content.ReadAsStringAsync(ct));
         }
         catch (HttpRequestException) { return (503, null); }
+        catch (BrokenCircuitException) { return (503, null); }
+        catch (TimeoutRejectedException) { return (503, null); }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested) { return (503, null); }
     }
 }

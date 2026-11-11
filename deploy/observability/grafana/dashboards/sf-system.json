@@ -1,0 +1,119 @@
+{
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "version": 1,
+  "panels": [
+    {
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      },
+      "title": "Request rate by service",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "id": 1,
+      "gridPos": {
+        "y": 0.0,
+        "x": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (service_name) (rate(http_server_request_duration_seconds_count[5m]))",
+          "legendFormat": "{{service_name}} {{state}} {{kind}} {{outcome}} {{queue}} {{event_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      },
+      "title": "5xx rate by service",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "reqps"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "id": 2,
+      "gridPos": {
+        "y": 0.0,
+        "x": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (service_name) (rate(http_server_request_duration_seconds_count{http_response_status_code=~\"5..\"}[5m]))",
+          "legendFormat": "{{service_name}} {{state}} {{kind}} {{outcome}} {{queue}} {{event_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      },
+      "title": "P95 request latency",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "id": 3,
+      "gridPos": {
+        "y": 8.0,
+        "x": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le,service_name) (rate(http_server_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{service_name}} {{state}} {{kind}} {{outcome}} {{queue}} {{event_name}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "tags": [
+    "stranglerforge",
+    "phase-08"
+  ],
+  "title": "System Overview",
+  "refresh": "15s",
+  "uid": "sf-system",
+  "schemaVersion": 41
+}

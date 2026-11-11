@@ -55,11 +55,12 @@ Run the same migration command with `ConnectionStrings__Inventory` set to each o
 
 ## Run services locally
 
-After setting `ConnectionStrings__Catalog`, `ConnectionStrings__Inventory`, and `ConnectionStrings__LegacyCommerce`, and starting RabbitMQ, run four terminals:
+After setting `ConnectionStrings__Catalog`, `ConnectionStrings__Inventory`, `ConnectionStrings__Orders`, `ConnectionStrings__LegacyCommerce`, and `OrdersInternal__Token`, and starting RabbitMQ, run five terminals:
 
 ```powershell
 dotnet run --project src/Services/Catalog/Catalog.Api --urls http://127.0.0.1:5082
 dotnet run --project src/Services/Inventory/Inventory.Api --urls http://127.0.0.1:5083
+dotnet run --project src/Services/Orders/Orders.Api --urls http://127.0.0.1:5084
 dotnet run --project src/LegacyMonolith/LegacyCommerce.Api --urls http://127.0.0.1:5081
 dotnet run --project src/Gateway/StranglerForge.Gateway --urls http://127.0.0.1:5080
 ```
@@ -82,7 +83,7 @@ All three connection strings must be set. A second import before cutover confirm
 
 ## Docker Compose
 
-`deploy/docker/compose.yml` defines SQL Server, separate Catalog, Inventory, and Orders PostgreSQL instances, RabbitMQ Management, all three extracted services, monolith, gateway, and bootstrap/cutover tools. Set `SQLSERVER_SA_PASSWORD`, `POSTGRES_PASSWORD`, `INVENTORY_POSTGRES_PASSWORD`, `ORDERS_POSTGRES_PASSWORD`, `ORDERS_INTERNAL_TOKEN`, `RABBITMQ_USER`, and `RABBITMQ_PASSWORD`. For a fresh deployment, resolve source references and freeze writes, then start the databases and broker, run the Catalog/Inventory/Orders import and verify jobs in sequence under their respective freezes, then start the application stack. The Compose application configuration is post-cutover and must not be launched as the authoritative deployment before import succeeds.
+`deploy/docker/compose.yml` defines SQL Server, separate Catalog, Inventory, and Orders PostgreSQL instances, RabbitMQ Management, all three extracted services, monolith, gateway, and bootstrap/cutover tools. Set `SQLSERVER_SA_PASSWORD`, `POSTGRES_PASSWORD`, `INVENTORY_POSTGRES_PASSWORD`, `ORDERS_POSTGRES_PASSWORD`, `MIGRATION_POSTGRES_PASSWORD`, `ORDERS_INTERNAL_TOKEN`, `RABBITMQ_USER`, `RABBITMQ_PASSWORD`, and `GRAFANA_ADMIN_PASSWORD`. For a fresh deployment, resolve source references and freeze writes, then start the databases and broker, run the Catalog/Inventory/Orders import and verify jobs in sequence under their respective freezes, then start the application stack. The Compose application configuration is post-cutover and must not be launched as the authoritative deployment before import succeeds.
 
 Phase 05.1 inspection found no Docker Desktop installation, Docker CLI or Engine, native RabbitMQ/Erlang service, or RabbitMQ executable in Ubuntu WSL. Ports 5672 and 15672 were closed. The Phase 05.1 Compose YAML parsed locally with 13 services; Phase 06 extended it to 17 services, and the Inventory service RabbitMQ host and health dependency were checked; `docker compose config`, container startup, and service connectivity could not run.
 
@@ -122,4 +123,13 @@ The Phase 06 development migration verified 64 historical orders (34 paid, 30 pa
 
 The gateway now validates service-level migration flags, records versioned migration states and audit entries, and exposes a local-only administrative API. The current deployment keeps Catalog, Inventory, and Orders PostgreSQL as authoritative; all new writes remain on their existing service routes. Canary assignment and shadow comparison are limited to pre-cutover `GET /api/products` when a compatible legacy read is explicitly available. The current development configuration is 100% modern with shadowing disabled. Invalid or conflicting settings fail closed, and route-only rollback to stale SQL is blocked. See [traffic migration](docs/migration/traffic-migration.md), [migration control](docs/architecture/migration-control.md), and [safe rollback](docs/migration/safe-rollback.md).
 
-Set `MigrationControl__AdminToken` through a local secret store to enable `/internal/migration` for loopback clients. Do not publish this endpoint. The state file is single-instance and ignored by Git; it is not a multi-replica coordination service. Migration counters use the `StranglerForge.Migration` meter without an exporter yet. Live RabbitMQ recovery, Docker startup, and multi-replica operation remain deferred.
+Set `MigrationControl__AdminToken` through a local secret store to enable `/internal/migration` for loopback clients. Do not publish this endpoint. Local file mode remains single-instance. Set `ConnectionStrings__MigrationControl` to a dedicated PostgreSQL database for replica coordination; every API request then verifies shared state and active flag revision, and fails closed if it cannot. OpenTelemetry exports migration counters and service traces through the Collector when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Live RabbitMQ and Docker startup remain deferred in this environment.
+
+
+## Phase 08 observability and resilience
+
+Phase 08 adds shared OpenTelemetry registration to all five HTTP hosts, bounded application metrics and spans, a Collector/Jaeger/Prometheus/Grafana Compose stack, seven provisioned dashboards, safe-read HTTP retry/circuit policies, gateway concurrency limiting, distinct liveness/readiness endpoints, development-only fault injection, and a PostgreSQL migration authority for gateway replicas. The current ownership and public business API contracts remain unchanged. See [architecture impact](docs/architecture/phase08-impact.md), [observability](docs/architecture/observability.md), [resilience](docs/architecture/resilience.md), [coordination](docs/architecture/multi-instance-coordination.md), and [operations](docs/operations/phase08-operations.md).
+
+For a local collector, set `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317`; leave it unset to run without export. The Compose stack injects its internal Collector URL. Run `dotnet restore StranglerForge.slnx`, `dotnet build StranglerForge.slnx --no-restore`, and `dotnet test StranglerForge.slnx --no-restore` with the existing isolated test database variables. The live coordination test is separate: set `MIGRATION_TEST_CONNECTION` to a PostgreSQL test database that permits temporary schemas, then run `dotnet test tests/LiveInfrastructureTests/MigrationAuthority.LiveTests/MigrationAuthority.LiveTests.csproj`. It creates and removes only its own random schema.
+
+Before starting Compose, run `docker compose -f deploy/docker/compose.yml config`, review ports and secrets, and complete the existing Catalog/Inventory/Orders imports under their respective freezes. Docker was unavailable during this implementation, so Collector, Jaeger, Grafana, RabbitMQ metrics, and full Compose startup remain unverified at runtime.
