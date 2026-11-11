@@ -1,10 +1,12 @@
+using StranglerForge.Observability;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using StranglerForge.Catalog.Application;
 using StranglerForge.Catalog.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Logging.AddJsonConsole();
+builder.Services.AddStranglerForgeTelemetry(builder.Configuration, builder.Environment, "catalog-service");
+builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
 var connection = builder.Configuration.GetConnectionString("Catalog")
     ?? throw new InvalidOperationException("ConnectionStrings:Catalog is required.");
 builder.Services.AddCatalogInfrastructure(connection);
@@ -37,8 +39,10 @@ app.Use(async (context, next) =>
         }
     }
 });
+app.UseDevelopmentFaultInjection(app.Environment, app.Configuration);
 app.MapHealthChecks("/health");
 app.MapGet("/health/live", () => Results.Ok());
+app.MapHealthChecks("/health/ready");
 app.MapGet("/api/products", (ProductQueries queries, CancellationToken ct) => queries.ListAsync(ct));
 app.MapGet("/api/products/{id:guid}", async (Guid id, ProductQueries queries, CancellationToken ct) =>
     await queries.FindAsync(id, ct) is { } product ? Results.Ok(product) : Results.NotFound());

@@ -1,23 +1,27 @@
 # Migration roadmap
+
 1. Foundation.
 2. Modular monolith and SQL Server.
 3. YARP gateway.
 4. Catalog extraction.
 5. Inventory and messaging.
-6. Orders and saga.
-7. Traffic migration and rollback.
-8. Resilience and observability.
-9. Containers, Kubernetes, and broad tests.
+6. Orders and persisted saga.
+7. Traffic migration and guarded rollback.
+8. Resilience, observability, and multi-instance coordination.
+9. Containers, Kubernetes, and broad deployment tests.
 10. Final cutover.
 
-Phases 01, 02, 02.1, 03, and 04 are implemented and locally validated. Phase 05 development Catalog reconciliation, Inventory migration, and through-YARP cutover have passed. Phase 05.1 verified that Docker Desktop/Engine and RabbitMQ/Erlang are absent on Windows, and Docker/RabbitMQ are absent in Ubuntu WSL. Static Compose YAML and RabbitMQ wiring checks passed; live RabbitMQ delivery, outbox replay, inbox deduplication, retries, error queues, consumer restart, and Compose startup remain unvalidated. The existing 38 tests passed. Phase 06 development Order Service, 64-row historical import, coordinated development routing, and through-YARP workflow have passed. The 12 Orders tests use isolated PostgreSQL and in-memory MassTransit; all 51 solution tests passed after Phase 06. Live RabbitMQ, Docker Compose, and multi-replica saga behavior remain deferred; Phase 07 has not started.
+Phases 01–07 are implemented; Phase 07 was merged to `main` as PR #1. Phase 08 is implemented on `feature/phase-08-resilience-observability` with local validation complete. The gateway can use a dedicated PostgreSQL migration authority for multi-instance state and configuration revisions. HTTP resilience, telemetry, dashboards, and development fault hooks are added without changing database ownership. All 77 solution tests and the isolated live PostgreSQL authority test passed. Docker and RabbitMQ runtime checks remain deferred because Docker is absent in this environment. Phase 09 has not started.
+
 ```mermaid
 flowchart LR
-  Client --> Gateway[YARP]
+  Client --> Gateway[YARP Gateway]
   Gateway --> Catalog[Catalog Service]
   Gateway --> Inventory[Inventory Service]
-  Gateway --> Orders[Order Service]
+  Gateway --> Orders[Orders Service]
   Gateway --> Legacy[Customers, Payments, Notifications]
+  Gateway --> Authority[(Migration PostgreSQL authority)]
+  Gateway & Catalog & Inventory & Orders & Legacy --> Collector[OpenTelemetry Collector]
+  Collector --> Jaeger[Jaeger traces]
+  Collector --> Prometheus[Prometheus metrics]
 ```
-
-Phase 07 adds gateway-local migration state, validated flags, a protected control boundary, read-only Catalog canary/shadow mechanics for pre-cutover use, contract comparison, and explicit rollback blocking for the post-cutover development data. It does not claim live broker or multi-replica validation. Phase 08 has not started.

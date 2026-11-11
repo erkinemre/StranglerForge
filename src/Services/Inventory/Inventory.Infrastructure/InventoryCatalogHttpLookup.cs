@@ -1,3 +1,5 @@
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 using System.Net;
 using Microsoft.Extensions.Logging;
 using StranglerForge.Inventory.Application;
@@ -18,7 +20,7 @@ public sealed class InventoryCatalogHttpLookup(HttpClient client, IInventoryCorr
             if (!response.IsSuccessStatusCode) throw new InventoryCatalogUnavailableException($"Catalog returned {(int)response.StatusCode}.");
             return true;
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested)
+        catch (Exception exception) when (exception is HttpRequestException or BrokenCircuitException or TimeoutRejectedException or TaskCanceledException && !ct.IsCancellationRequested)
         {
             logger.LogError(exception, "Catalog product check failed for {ProductId}", productId);
             throw new InventoryCatalogUnavailableException("Catalog product check is unavailable.", exception);

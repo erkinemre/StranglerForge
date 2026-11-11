@@ -8,4 +8,4 @@
 - **Rollback during active saga:** Keep modern ownership, enter `RollbackPending` or `ReconciliationRequired`, and allow existing idempotent saga recovery commands. Verify reservations, payments, notifications, and outbox state before any data transfer.
 - **Database connectivity failure:** Repair the authoritative database; do not rerun one-shot importers after post-cutover writes.
 
-The administrative API is local-only and disabled without `MigrationControl__AdminToken`. Its file state is single-instance. For a multi-replica deployment, provision a coordinated external control plane and independently verified data checkpoints. RabbitMQ and Docker Compose runtime checks remain outstanding; this document does not claim broker recovery was tested.
+The administrative API is local-only and disabled without `MigrationControl__AdminToken`. Its file mode is single-instance. Multi-replica deployments use the dedicated PostgreSQL authority and still require independently verified data checkpoints. RabbitMQ and Docker Compose runtime checks remain outstanding; this document does not claim broker recovery was tested.

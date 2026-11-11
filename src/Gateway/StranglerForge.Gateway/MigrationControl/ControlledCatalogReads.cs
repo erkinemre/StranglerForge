@@ -109,8 +109,7 @@ public sealed class ControlledCatalogReads(IConfiguration configuration, IHttpCl
         if (catalog.Owner == DataOwner.Modern && stage is not (MigrationStage.ModernActive or MigrationStage.RollbackPending or MigrationStage.ReconciliationRequired or MigrationStage.LegacyRetired))
             return Results.StatusCode(503);
         var key = context.Request.Headers["X-Migration-Key"].ToString();
-        var modern = catalog.Owner == DataOwner.Modern || (stage == MigrationStage.CanaryReady && (string.IsNullOrWhiteSpace(key) || TrafficAssignment.IsModern(key, catalog.ModernReadPercent))) ||
-            (stage == MigrationStage.ShadowValidation && catalog.ModernReadPercent == 100);
+        var modern = catalog.Owner == DataOwner.Modern || (stage == MigrationStage.CanaryReady && (string.IsNullOrWhiteSpace(key) || TrafficAssignment.IsModern(key, catalog.ModernReadPercent)));
         var primary = modern ? "catalog" : "legacy";
         var secondary = modern ? "legacy" : "catalog";
         var correlation = Guid.Parse(context.Request.Headers["X-Correlation-ID"].ToString());

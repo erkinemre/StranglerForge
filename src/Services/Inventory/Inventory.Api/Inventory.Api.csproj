@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Inventory.Infrastructure\Inventory.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\..\BuildingBlocks\StranglerForge.Observability\StranglerForge.Observability.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -10,4 +11,4 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
-  <ItemGroup><PackageReference Include="MassTransit.RabbitMQ" /><PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" /></ItemGroup></Project>
+  <ItemGroup><PackageReference Include="MassTransit.RabbitMQ" /><PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" /><PackageReference Include="Microsoft.Extensions.Http.Resilience" /></ItemGroup></Project>

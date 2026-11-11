@@ -7,7 +7,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Npgsql" />
     <PackageReference Include="Yarp.ReverseProxy" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\BuildingBlocks\StranglerForge.Observability\StranglerForge.Observability.csproj" />
   </ItemGroup>
 
 </Project>

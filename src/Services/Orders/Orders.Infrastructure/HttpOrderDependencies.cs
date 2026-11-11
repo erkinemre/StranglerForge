@@ -1,3 +1,5 @@
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 using Microsoft.Extensions.Configuration;
 using System.Net;
 using System.Net.Http.Json;
@@ -5,7 +7,7 @@ using StranglerForge.Orders.Application;
 
 namespace StranglerForge.Orders.Infrastructure;
 
-public sealed class HttpOrderDependencies(HttpClient client, IConfiguration configuration) : IOrderDependencies
+public sealed class HttpOrderDependencies(IHttpClientFactory factory, IConfiguration configuration) : IOrderDependencies
 {
     private readonly Uri legacy = new(configuration["LegacyService:BaseUrl"] ?? throw new InvalidOperationException("LegacyService:BaseUrl required."));
     private readonly Uri catalog = new(configuration["CatalogService:BaseUrl"] ?? throw new InvalidOperationException("CatalogService:BaseUrl required."));
@@ -13,13 +15,13 @@ public sealed class HttpOrderDependencies(HttpClient client, IConfiguration conf
     private readonly string token = configuration["OrdersInternal:Token"] ?? throw new InvalidOperationException("OrdersInternal:Token required.");
     public async Task<bool> CustomerExistsAsync(Guid id, CancellationToken ct)
     {
-        var response = await SendAsync(HttpMethod.Get, legacy, $"api/customers/{id}", null, Guid.NewGuid(), false, ct);
+        var response = await SendAsync(HttpMethod.Get, "orders-legacy", legacy, $"api/customers/{id}", null, Guid.NewGuid(), false, ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return false;
         Ensure(response); return true;
     }
     public async Task<decimal?> ProductPriceAsync(Guid id, CancellationToken ct)
     {
-        var response = await SendAsync(HttpMethod.Get, catalog, $"api/products/{id}", null, Guid.NewGuid(), false, ct);
+        var response = await SendAsync(HttpMethod.Get, "orders-catalog", catalog, $"api/products/{id}", null, Guid.NewGuid(), false, ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         Ensure(response);
         var product = await response.Content.ReadFromJsonAsync<ProductResponse>(cancellationToken: ct);
@@ -27,7 +29,7 @@ public sealed class HttpOrderDependencies(HttpClient client, IConfiguration conf
     }
     public async Task<ReserveOutcome> ReserveAsync(Guid orderId, Guid productId, int quantity, Guid correlationId, CancellationToken ct)
     {
-        var response = await SendAsync(HttpMethod.Post, inventory, "api/inventory/reservations", new { reservationId = orderId, orderId, productId, quantity }, correlationId, false, ct);
+        var response = await SendAsync(HttpMethod.Post, "orders-inventory", inventory, "api/inventory/reservations", new { reservationId = orderId, orderId, productId, quantity }, correlationId, false, ct);
         if (response.IsSuccessStatusCode) return ReserveOutcome.Reserved;
         if (response.StatusCode == HttpStatusCode.Conflict)
         {
@@ -36,18 +38,20 @@ public sealed class HttpOrderDependencies(HttpClient client, IConfiguration conf
         }
         return ReserveOutcome.Uncertain;
     }
-    public async Task ReleaseAsync(Guid orderId, Guid correlationId, CancellationToken ct) => Ensure(await SendAsync(HttpMethod.Post, inventory, $"api/inventory/reservations/{orderId}/release", new { }, correlationId, false, ct));
-    public async Task ConfirmAsync(Guid orderId, Guid correlationId, CancellationToken ct) => Ensure(await SendAsync(HttpMethod.Post, inventory, $"api/inventory/reservations/{orderId}/confirm", new { }, correlationId, false, ct));
+    public async Task ReleaseAsync(Guid orderId, Guid correlationId, CancellationToken ct) => Ensure(await SendAsync(HttpMethod.Post, "orders-inventory", inventory, $"api/inventory/reservations/{orderId}/release", new { }, correlationId, false, ct));
+    public async Task ConfirmAsync(Guid orderId, Guid correlationId, CancellationToken ct) => Ensure(await SendAsync(HttpMethod.Post, "orders-inventory", inventory, $"api/inventory/reservations/{orderId}/confirm", new { }, correlationId, false, ct));
     public async Task<PaymentOutcome> AuthorizeAsync(Guid orderId, decimal amount, bool succeed, Guid correlationId, CancellationToken ct)
     {
-        var response = await SendAsync(HttpMethod.Post, legacy, $"internal/payments/{orderId}/authorize", new { amount, succeed }, correlationId, true, ct);
+        HttpResponseMessage response;
+        try { response = await SendAsync(HttpMethod.Post, "orders-legacy", legacy, $"internal/payments/{orderId}/authorize", new { amount, succeed }, correlationId, true, ct); }
+        catch (DependencyUnavailableException) { return PaymentOutcome.Uncertain; }
         if (response.StatusCode == HttpStatusCode.Conflict) return PaymentOutcome.Uncertain;
         if (!response.IsSuccessStatusCode) return PaymentOutcome.Uncertain;
         var result = await response.Content.ReadFromJsonAsync<PaymentResponse>(cancellationToken: ct);
         return result?.Succeeded == true ? PaymentOutcome.Authorized : PaymentOutcome.Rejected;
     }
-    public async Task RecordNotificationAsync(Guid orderId, Guid customerId, bool succeeded, Guid correlationId, CancellationToken ct) => Ensure(await SendAsync(HttpMethod.Post, legacy, $"internal/notifications/{orderId}", new { customerId, succeeded }, correlationId, true, ct));
-    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, Uri root, string path, object? body, Guid correlationId, bool internalCall, CancellationToken ct)
+    public async Task RecordNotificationAsync(Guid orderId, Guid customerId, bool succeeded, Guid correlationId, CancellationToken ct) => Ensure(await SendAsync(HttpMethod.Post, "orders-legacy", legacy, $"internal/notifications/{orderId}", new { customerId, succeeded }, correlationId, true, ct));
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string dependency, Uri root, string path, object? body, Guid correlationId, bool internalCall, CancellationToken ct)
     {
         try
         {
@@ -55,10 +59,12 @@ public sealed class HttpOrderDependencies(HttpClient client, IConfiguration conf
             request.Headers.Add("X-Correlation-ID", correlationId.ToString("D"));
             if (internalCall) request.Headers.Add("X-Orders-Internal-Token", token);
             if (body is not null) request.Content = JsonContent.Create(body);
-            return await client.SendAsync(request, ct);
+            return await factory.CreateClient(dependency).SendAsync(request, ct);
         }
         catch (HttpRequestException error) { throw new DependencyUnavailableException($"{root.Host} unavailable.", error); }
         catch (TaskCanceledException error) when (!ct.IsCancellationRequested) { throw new DependencyUnavailableException($"{root.Host} timed out.", error); }
+        catch (Exception error) when (!ct.IsCancellationRequested && error is BrokenCircuitException or TimeoutRejectedException)
+        { throw new DependencyUnavailableException($"{root.Host} resilience policy rejected the call.", error); }
     }
     private static void Ensure(HttpResponseMessage response)
     {

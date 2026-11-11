@@ -1,0 +1,119 @@
+{
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "version": 1,
+  "panels": [
+    {
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      },
+      "title": "Dependency failures",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "id": 1,
+      "gridPos": {
+        "y": 0.0,
+        "x": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (service) (rate(stranglerforge_dependency_failures_total[5m]))",
+          "legendFormat": "{{service_name}} {{state}} {{kind}} {{outcome}} {{queue}} {{event_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      },
+      "title": "Circuit state transitions",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "id": 2,
+      "gridPos": {
+        "y": 0.0,
+        "x": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (event_name,pipeline_name) (rate(resilience_polly_strategy_events_total{event_name=~\"OnCircuitOpened|OnCircuitHalfOpened|OnCircuitClosed\"}[5m]))",
+          "legendFormat": "{{service_name}} {{state}} {{kind}} {{outcome}} {{queue}} {{event_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "options": {
+        "legend": {
+          "placement": "bottom",
+          "displayMode": "list"
+        }
+      },
+      "title": "Retries and timeouts",
+      "fieldConfig": {
+        "overrides": [],
+        "defaults": {
+          "unit": "ops"
+        }
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "type": "timeseries",
+      "id": 3,
+      "gridPos": {
+        "y": 8.0,
+        "x": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "expr": "sum by (event_name,pipeline_name) (rate(resilience_polly_strategy_events_total{event_name=~\"OnRetry|OnTimeout\"}[5m]))",
+          "legendFormat": "{{service_name}} {{state}} {{kind}} {{outcome}} {{queue}} {{event_name}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "tags": [
+    "stranglerforge",
+    "phase-08"
+  ],
+  "title": "Resilience and Circuit Breakers",
+  "refresh": "15s",
+  "uid": "sf-resilience",
+  "schemaVersion": 41
+}

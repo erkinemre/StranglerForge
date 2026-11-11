@@ -1,3 +1,5 @@
+using Polly.CircuitBreaker;
+using Polly.Timeout;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
@@ -22,7 +24,7 @@ public sealed class CatalogHttpProductReader(
             return product is null || product.Id != id || product.Price <= 0 ? throw new CatalogUnavailableException("Catalog returned an invalid product.") :
                 new ProductSnapshot(product.Id, product.Price);
         }
-        catch (Exception exception) when (exception is HttpRequestException or System.Text.Json.JsonException ||
+        catch (Exception exception) when (exception is HttpRequestException or System.Text.Json.JsonException or BrokenCircuitException or TimeoutRejectedException ||
             exception is TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
             logger.LogError(exception, "Catalog lookup failed for product {ProductId}", id);

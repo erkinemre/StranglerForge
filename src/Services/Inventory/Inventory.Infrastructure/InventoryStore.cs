@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -10,6 +11,9 @@ namespace StranglerForge.Inventory.Infrastructure;
 
 public sealed class InventoryStore(InventoryDb db, IPublishEndpoint publisher, IInventoryCorrelation correlation) : IInventoryStore
 {
+    private static readonly Meter Meter = new("StranglerForge.Inventory");
+    private static readonly Counter<long> Duplicates = Meter.CreateCounter<long>("stranglerforge.inventory.duplicates");
+    private static readonly Counter<long> ConcurrencyConflicts = Meter.CreateCounter<long>("stranglerforge.inventory.concurrency_conflicts");
     private DbSet<StockItem> Stock => db.Stock;
     private DbSet<StockReservation> Reservations => db.Reservations;
     private DbSet<InventoryAdjustment> Adjustments => db.Adjustments;
@@ -29,8 +33,11 @@ public sealed class InventoryStore(InventoryDb db, IPublishEndpoint publisher, I
         {
             var existing = await GetReservationAsync(command.ReservationId, ct);
             if (existing is not null)
+            {
+                Duplicates.Add(1);
                 return existing.OrderId == command.OrderId && existing.ProductId == command.ProductId && existing.Quantity == command.Quantity
                     ? InventoryResult<ReservationSnapshot>.Ok(existing) : InventoryResult<ReservationSnapshot>.Fail("Reservation identifier conflict.");
+            }
             try
             {
                 await using var transaction = await Database.BeginTransactionAsync(ct);
@@ -47,6 +54,7 @@ public sealed class InventoryStore(InventoryDb db, IPublishEndpoint publisher, I
             }
             catch (DbUpdateException exception) when (exception.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
             {
+                Duplicates.Add(1);
                 ChangeTracker.Clear();
                 var duplicate = await GetReservationAsync(command.ReservationId, ct);
                 if (duplicate is not null) return duplicate.OrderId == command.OrderId && duplicate.ProductId == command.ProductId && duplicate.Quantity == command.Quantity
@@ -55,6 +63,7 @@ public sealed class InventoryStore(InventoryDb db, IPublishEndpoint publisher, I
             }
             catch (PostgresException exception) when (exception.SqlState is PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected && attempt < 2)
             {
+                ConcurrencyConflicts.Add(1);
                 ChangeTracker.Clear();
                 await Task.Delay(TimeSpan.FromMilliseconds(40 * (attempt + 1)), ct);
             }
@@ -74,7 +83,7 @@ public sealed class InventoryStore(InventoryDb db, IPublishEndpoint publisher, I
         if (reservation.Status != ReservationStatus.Reserved) return InventoryResult<ReservationSnapshot>.Fail("Reservation already finalized.");
         var changed = await Reservations.Where(x => x.Id == id && x.Status == ReservationStatus.Reserved)
             .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.Status, expected), ct);
-        if (changed == 0) return InventoryResult<ReservationSnapshot>.Fail("Concurrent reservation transition.");
+        if (changed == 0) { ConcurrencyConflicts.Add(1); return InventoryResult<ReservationSnapshot>.Fail("Concurrent reservation transition."); }
         var stockChanged = confirm
             ? await Stock.Where(x => x.ProductId == reservation.ProductId && x.Reserved >= reservation.Quantity)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(x => x.Reserved, x => x.Reserved - reservation.Quantity).SetProperty(x => x.Quantity, x => x.Quantity - reservation.Quantity), ct)

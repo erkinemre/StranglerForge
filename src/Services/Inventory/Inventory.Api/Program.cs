@@ -1,3 +1,4 @@
+using StranglerForge.Observability;
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -5,12 +6,14 @@ using StranglerForge.Inventory.Application;
 using StranglerForge.Inventory.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Logging.AddJsonConsole();
+builder.Services.AddStranglerForgeTelemetry(builder.Configuration, builder.Environment, "inventory-service");
+builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
 var connection = builder.Configuration.GetConnectionString("Inventory") ?? throw new InvalidOperationException("ConnectionStrings:Inventory is required.");
 builder.Services.AddInventoryInfrastructure(connection);
+builder.Services.AddOutboxMetrics<InventoryDb>("inventory");
 builder.Services.AddScoped<InventoryUseCases>();
 builder.Services.AddScoped<IInventoryCorrelation, InventoryCorrelation>();
-builder.Services.AddHttpClient<IInventoryProductCatalog, InventoryCatalogHttpLookup>(client => { client.BaseAddress = new Uri(builder.Configuration["CatalogService:BaseUrl"] ?? "http://127.0.0.1:5082/"); client.Timeout = TimeSpan.FromSeconds(3); });
+builder.Services.AddHttpClient<IInventoryProductCatalog, InventoryCatalogHttpLookup>(client => { client.BaseAddress = new Uri(builder.Configuration["CatalogService:BaseUrl"] ?? "http://127.0.0.1:5082/"); client.Timeout = TimeSpan.FromSeconds(7); }).AddSafeReadResilience();
 builder.Services.AddHealthChecks().AddCheck<InventoryDatabaseHealthCheck>("inventory-database");
 var rabbit = builder.Configuration["RabbitMq:Host"] ?? "localhost";
 builder.Services.AddMassTransit(x =>
@@ -34,17 +37,21 @@ app.Use(async (context, next) =>
     context.RequestServices.GetRequiredService<IInventoryCorrelation>().CorrelationId = correlation;
     context.Response.Headers["X-Correlation-ID"] = correlation.ToString("D");
     context.Request.Headers["X-Correlation-ID"] = correlation.ToString("D");
+    using var scope = app.Logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlation.ToString("D"), ["ServiceName"] = "inventory-service" });
     try { await next(context); }
     catch (Exception exception) when (exception is DbUpdateException or Npgsql.NpgsqlException or InventoryCatalogUnavailableException)
     {
+        Telemetry.DependencyFailures.Add(1, new KeyValuePair<string, object?>("service", "inventory"));
         context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("InventoryDatabase").LogError(exception, "Inventory database unavailable");
         if (context.Response.HasStarted) throw;
         context.Response.StatusCode = 503;
         await context.Response.WriteAsJsonAsync(new { title = "Inventory unavailable", status = 503 });
     }
 });
+app.UseDevelopmentFaultInjection(app.Environment, app.Configuration);
 app.MapHealthChecks("/health");
 app.MapGet("/health/live", () => Results.Ok());
+app.MapHealthChecks("/health/ready");
 app.MapGet("/api/inventory/{productId:guid}", async (Guid productId, InventoryUseCases useCases, CancellationToken ct) =>
     await useCases.GetStockAsync(productId, ct) is { } stock ? Results.Ok(new { productId, quantity = stock.Available }) : Results.NotFound());
 app.MapPost("/api/inventory/{productId:guid}/stock", async (Guid productId, StockInput input, InventoryUseCases useCases, CancellationToken ct) =>
@@ -87,8 +94,17 @@ public sealed class InventoryReservedAuditConsumer(InventoryDb db, ILogger<Inven
 {
     public async Task Consume(ConsumeContext<InventoryReservedV1> context)
     {
-        var message = context.Message;
-        await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"InventoryAudit\" (\"EventId\", \"ReservationId\", \"Kind\", \"OccurredAtUtc\") VALUES ({message.EventId}, {message.ReservationId}, {"Reserved"}, {message.OccurredAtUtc}) ON CONFLICT (\"EventId\") DO NOTHING", context.CancellationToken);
-        logger.LogInformation("Processed inventory event {EventId} for reservation {ReservationId}", message.EventId, message.ReservationId);
+        try
+        {
+            var message = context.Message;
+            await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO \"InventoryAudit\" (\"EventId\", \"ReservationId\", \"Kind\", \"OccurredAtUtc\") VALUES ({message.EventId}, {message.ReservationId}, {"Reserved"}, {message.OccurredAtUtc}) ON CONFLICT (\"EventId\") DO NOTHING", context.CancellationToken);
+            Telemetry.ConsumerProcessed.Add(1, new KeyValuePair<string, object?>("service", "inventory"));
+            logger.LogInformation("Processed inventory event {EventId} for reservation {ReservationId}", message.EventId, message.ReservationId);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            Telemetry.ConsumerFailures.Add(1, new KeyValuePair<string, object?>("service", "inventory"));
+            throw;
+        }
     }
 }
