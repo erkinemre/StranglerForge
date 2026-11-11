@@ -71,6 +71,8 @@ public sealed class HttpOrderDependencies(IHttpClientFactory factory, IConfigura
             using var request = new HttpRequestMessage(method, new Uri(root, path));
             request.Headers.Add("X-Correlation-ID", correlationId.ToString("D"));
             if (internalCall) request.Headers.Add("X-Orders-Internal-Token", token);
+            if (dependency == "orders-inventory" && method != HttpMethod.Get && configuration["Inventory:ReservationToken"] is { Length: > 0 } inventoryToken)
+                request.Headers.Add("X-Inventory-Internal-Token", inventoryToken);
             if (body is not null) request.Content = JsonContent.Create(body);
             return await factory.CreateClient(dependency).SendAsync(request, ct);
         }

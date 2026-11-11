@@ -130,6 +130,8 @@ jobs:
           RABBITMQ_PASSWORD: isolated-ci-password
           GRAFANA_ADMIN_PASSWORD: isolated-ci-password
           ORDERS_INTERNAL_TOKEN: isolated-ci-token
+          INVENTORY_STOCK_ADMIN_TOKEN: isolated-ci-stock-token
+          INVENTORY_RESERVATION_TOKEN: isolated-ci-reservation-token
         run: docker compose -f deploy/docker/compose.yml config --quiet
       - name: Build application images
         run: |
