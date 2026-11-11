@@ -1,4 +1,4 @@
-# Current architecture: Phase 06 development cutover
+# Current hybrid architecture
 
 ```mermaid
 flowchart LR
@@ -26,3 +26,5 @@ Phase 07 keeps this ownership and routing topology. The gateway adds a local mig
 Phase 08 adds a dedicated PostgreSQL migration authority for multi-instance gateway deployments and OTLP export from all five HTTP hosts. See [observability](observability.md) and [coordination](multi-instance-coordination.md). The prior diagram shows business data ownership; the migration authority does not own commerce data.
 
 Phase 09 packages the same five HTTP hosts as non-root containers and adds a Kustomize deployment reference. No service ownership changes. See [deployment architecture](deployment-architecture.md), [security](infrastructure-security.md), and [CI/CD](ci-cd-architecture.md).
+
+Phase 10 leaves Customer, simulated Payment, and Notification modules in LegacyCommerce. Extracted Catalog, Inventory, and Orders code remains in the monolith only for guarded recovery; it is not an active writer. See the [final engineering review](final-engineering-review.md).

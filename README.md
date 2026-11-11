@@ -2,9 +2,15 @@
 
 StranglerForge is an **educational enterprise architecture reference implementation** of incremental LegacyCommerce modernization on .NET 10. It demonstrates a Strangler Fig migration from a SQL Server modular monolith through a YARP gateway to extracted Catalog, Inventory, and Orders services backed by PostgreSQL. It is not a production-ready commerce platform.
 
+## Modernization at a glance
+
+LegacyCommerce began as one SQL Server deployment. YARP now routes Catalog, Inventory, and Orders to separate ASP.NET Core services with their own PostgreSQL databases. Customers, simulated Payments, and Notifications remain in the monolith. Orders uses a persisted saga, idempotent HTTP participants, and MassTransit outbox/inbox messaging; the gateway guards migration ownership and shared state. See the [final engineering review](docs/architecture/final-engineering-review.md), [acceptance matrix](docs/architecture/acceptance-matrix.md), [technical debt](docs/architecture/technical-debt.md), and [migration roadmap](docs/migration/migration-roadmap.md).
+
+The normal solution suite requires isolated SQL Server and PostgreSQL test databases. CI also builds all five container images, renders Kubernetes overlays, checks Compose interpolation, and runs disposable PostgreSQL/RabbitMQ containers. The Phase 10 live MassTransit gate is tracked in its PR. No Kubernetes cluster deployment, production restore drill, or performance benchmark is claimed.
+
 ## Repository guidance
 
-See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and the [Changelog](CHANGELOG.md). The GitHub Actions workflow restores and builds the solution, then runs gateway tests. The full database-backed suite requires isolated SQL Server and PostgreSQL instances and is validated locally; live RabbitMQ and Docker Compose checks remain separate operational gates. No release version or license has been assigned.
+See [Contributing](CONTRIBUTING.md), [Security](SECURITY.md), and the [Changelog](CHANGELOG.md). The GitHub Actions workflow restores and builds the solution, runs database-backed tests against isolated services, audits dependencies, builds images, renders Kubernetes overlays, and runs Docker-backed infrastructure checks. No release version or license has been assigned.
 ## Architecture and ownership
 
 ```mermaid
@@ -139,3 +145,7 @@ Before starting Compose, run `docker compose -f deploy/docker/compose.yml config
 Phase 09 adds a non-root multi-stage Docker image, loopback-scoped Compose development ports, five Kustomize application deployments, ingress, probes, resources, a two-replica gateway with HPA/PDB, external Secret references, isolated Testcontainers infrastructure checks, and broader CI quality gates. Stateful databases, RabbitMQ, and observability storage remain external to the Kubernetes manifests. See [deployment design](docs/architecture/deployment-architecture.md), [integration testing](docs/architecture/integration-testing-strategy.md), [security](docs/architecture/infrastructure-security.md), [CI/CD](docs/architecture/ci-cd-architecture.md), and [deployment runbook](docs/operations/phase09-deployment.md).
 
 Run `python scripts/validate-deployment.py` with PyYAML installed, `dotnet restore StranglerForge.slnx`, `dotnet build StranglerForge.slnx --no-restore`, and `dotnet test StranglerForge.slnx --no-restore` with isolated test database variables. When Docker is available, run `docker compose -f deploy/docker/compose.yml config --quiet` with the required environment variables and `dotnet test tests/LiveInfrastructureTests/Deployment.LiveTests/Deployment.LiveTests.csproj`. Review `kubectl kustomize deploy/kubernetes/overlays/production` and replace placeholder images and ingress settings before applying. Docker and Kubernetes runtime checks were not available in the authoring environment.
+
+## Phase 10 final review
+
+The final phase retains legacy Catalog, Inventory, and Orders code and SQL history until dependency and rollback-window checks justify retirement. Production-mode Inventory writes require separate stock-admin and reservation tokens; Development without configured tokens keeps the existing local workflow. See the [threat model](docs/architecture/security-threat-model.md), [deployment Secret keys](docs/operations/phase09-deployment.md), and [bounded performance scenarios](docs/performance/load-testing.md). No automatic PR merge or production deployment is part of this phase.

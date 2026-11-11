@@ -50,8 +50,7 @@ for path in (ROOT / "deploy/observability/grafana/dashboards").glob("*.json"):
     except (json.JSONDecodeError, UnicodeError) as exc:
         errors.append(f"{path}: {exc}")
 
-for path in [ROOT / "README.md", *ROOT.glob("docs/architecture/*deployment*.md"),
-             *ROOT.glob("docs/operations/phase09*.md")]:
+for path in [ROOT / "README.md", *ROOT.glob("docs/**/*.md")]:
     if not path.exists():
         continue
     for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", path.read_text(encoding="utf-8")):
