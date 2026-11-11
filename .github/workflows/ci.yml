@@ -79,7 +79,7 @@ jobs:
           ConnectionStrings__Inventory="$INVENTORY_BROKER_TEST_CONNECTION" dotnet tool run dotnet-ef database update --project src/Services/Inventory/Inventory.Infrastructure --startup-project src/Services/Inventory/Inventory.Api
           ConnectionStrings__Orders="$ORDERS_TEST_CONNECTION" dotnet tool run dotnet-ef database update --project src/Services/Orders/Orders.Infrastructure --startup-project src/Services/Orders/Orders.Api
       - name: Full solution tests
-        run: dotnet test StranglerForge.slnx --no-restore --logger 'console;verbosity=minimal'
+        run: dotnet test StranglerForge.slnx --no-restore -m:1 --blame-hang-timeout 5m --logger 'console;verbosity=normal'
       - name: Migration coordination live test
         run: dotnet test tests/LiveInfrastructureTests/MigrationAuthority.LiveTests/MigrationAuthority.LiveTests.csproj --logger 'console;verbosity=minimal'
 
