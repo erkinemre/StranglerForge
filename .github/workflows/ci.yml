@@ -59,6 +59,7 @@ jobs:
       ORDERS_TEST_CONNECTION: Host=localhost;Port=5432;Database=orders_tests;Username=test;Password=isolated-ci-password
       MIGRATION_TEST_CONNECTION: Host=localhost;Port=5432;Database=migration_tests;Username=test;Password=isolated-ci-password
       CATALOG_SOURCE_CONNECTION: Server=localhost,1433;Database=CatalogSourceTests;User ID=sa;Password=IsolatedCiPassword123!;TrustServerCertificate=true
+      LEGACY_TEST_CONNECTION: Server=localhost,1433;Database=LegacyCommerceTests;User ID=sa;Password=IsolatedCiPassword123!;TrustServerCertificate=true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -71,6 +72,12 @@ jobs:
           done
       - name: Restore
         run: dotnet restore StranglerForge.slnx
+      - name: Apply isolated EF migrations
+        run: |
+          dotnet tool restore
+          ConnectionStrings__Inventory="$INVENTORY_TEST_CONNECTION" dotnet tool run dotnet-ef database update --project src/Services/Inventory/Inventory.Infrastructure --startup-project src/Services/Inventory/Inventory.Api
+          ConnectionStrings__Inventory="$INVENTORY_BROKER_TEST_CONNECTION" dotnet tool run dotnet-ef database update --project src/Services/Inventory/Inventory.Infrastructure --startup-project src/Services/Inventory/Inventory.Api
+          ConnectionStrings__Orders="$ORDERS_TEST_CONNECTION" dotnet tool run dotnet-ef database update --project src/Services/Orders/Orders.Infrastructure --startup-project src/Services/Orders/Orders.Api
       - name: Full solution tests
         run: dotnet test StranglerForge.slnx --no-restore --logger 'console;verbosity=minimal'
       - name: Migration coordination live test
