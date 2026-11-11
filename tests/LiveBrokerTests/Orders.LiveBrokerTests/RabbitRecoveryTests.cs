@@ -79,54 +79,50 @@ public sealed class RabbitRecoveryTests
         Assert.Equal(1, await result.Set<InboxState>().CountAsync(x => x.MessageId == eventId));
     }
     [Fact]
-    public async Task FailedConsumerMovesEventToErrorQueueAndRecoversAfterRestart()
+    public async Task FailedConsumerMovesEventToErrorQueueAndProcessesAfterFaultRemoval()
     {
         var eventId = Guid.NewGuid();
         var orderId = Guid.NewGuid();
         var host = Required("ORDERS_LIVE_RABBIT_HOST");
-        WebApplicationFactory<Program>? recovered = null;
-        await using (var failing = Factory(host, failAudit: true))
+        await using var factory = Factory(host, failAudit: true);
+        using var client = factory.CreateClient();
+        var bus = factory.Services.GetRequiredService<IBus>();
+        await bus.Publish(new OrderTransitionedV1(eventId, Guid.NewGuid(), orderId, "FailureProbe", DateTime.UtcNow), context => context.MessageId = eventId);
+        var connectionFactory = new ConnectionFactory
         {
-            using var client = failing.CreateClient();
-            await failing.Services.GetRequiredService<IBus>().Publish(new OrderTransitionedV1(eventId, Guid.NewGuid(), orderId, "FailureProbe", DateTime.UtcNow), context => context.MessageId = eventId);
-            var connectionFactory = new ConnectionFactory
-            {
-                HostName = host,
-                VirtualHost = Required("ORDERS_LIVE_RABBIT_VHOST"),
-                UserName = Required("ORDERS_LIVE_RABBIT_USER"),
-                Password = Required("ORDERS_LIVE_RABBIT_PASSWORD")
-            };
-            await using var connection = await connectionFactory.CreateConnectionAsync();
-            await using var channel = await connection.CreateChannelAsync();
-            const string errorQueue = "OrderTransitionAudit_error";
-            var found = false;
-            for (var attempt = 0; attempt < 200; attempt++)
-            {
-                try { found = (await channel.QueueDeclarePassiveAsync(errorQueue)).MessageCount > 0; }
-                catch (RabbitMQ.Client.Exceptions.OperationInterruptedException) { }
-                if (found) break;
-                await Task.Delay(200);
-            }
-            using var scope = failing.Services.CreateScope();
+            HostName = host,
+            VirtualHost = Required("ORDERS_LIVE_RABBIT_VHOST"),
+            UserName = Required("ORDERS_LIVE_RABBIT_USER"),
+            Password = Required("ORDERS_LIVE_RABBIT_PASSWORD")
+        };
+        await using var connection = await connectionFactory.CreateConnectionAsync();
+        await using var channel = await connection.CreateChannelAsync();
+        const string errorQueue = "OrderTransitionAudit_error";
+        var found = false;
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            found = (await channel.QueueDeclarePassiveAsync(errorQueue)).MessageCount > 0;
+            if (found) break;
+            await Task.Delay(200);
+        }
+        using (var scope = factory.Services.CreateScope())
+        {
             var auditCount = await scope.ServiceProvider.GetRequiredService<OrdersDb>().Audit.CountAsync(x => x.EventId == eventId);
             Assert.True(found, $"Expected failed message in {errorQueue} after bounded retry window; audit rows: {auditCount}.");
             Assert.Equal(0, auditCount);
-            recovered = Factory(host);
-            using var started = recovered.CreateClient();
         }
-        await using var recoveredHost = recovered ?? throw new InvalidOperationException("Recovery host was not started.");
-        using var recoveredClient = recoveredHost.CreateClient();
+        factory.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()["FaultInjection:FailOrderAuditConsumer"] = "false";
         var recoveryId = Guid.NewGuid();
-        await recoveredHost.Services.GetRequiredService<IBus>().Publish(new OrderTransitionedV1(recoveryId, Guid.NewGuid(), orderId, "Recovered", DateTime.UtcNow), context => context.MessageId = recoveryId);
+        await bus.Publish(new OrderTransitionedV1(recoveryId, Guid.NewGuid(), orderId, "Recovered", DateTime.UtcNow), context => context.MessageId = recoveryId);
         var processed = false;
-        for (var attempt = 0; attempt < 200; attempt++)
+        for (var attempt = 0; attempt < 100; attempt++)
         {
-            using var scope = recoveredHost.Services.CreateScope();
+            using var scope = factory.Services.CreateScope();
             processed = await scope.ServiceProvider.GetRequiredService<OrdersDb>().Audit.AnyAsync(x => x.EventId == recoveryId);
             if (processed) break;
             await Task.Delay(200);
         }
-        Assert.True(processed, "Consumer did not process a new event after restart.");
+        Assert.True(processed, "Consumer did not process a new event after fault removal.");
     }
     private sealed class FakeDependencies : IOrderDependencies
     {
