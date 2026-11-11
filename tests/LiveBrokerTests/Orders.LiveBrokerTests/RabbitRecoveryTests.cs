@@ -84,6 +84,7 @@ public sealed class RabbitRecoveryTests
         var eventId = Guid.NewGuid();
         var orderId = Guid.NewGuid();
         var host = Required("ORDERS_LIVE_RABBIT_HOST");
+        WebApplicationFactory<Program>? recovered = null;
         await using (var failing = Factory(host, failAudit: true))
         {
             using var client = failing.CreateClient();
@@ -110,21 +111,24 @@ public sealed class RabbitRecoveryTests
             var auditCount = await scope.ServiceProvider.GetRequiredService<OrdersDb>().Audit.CountAsync(x => x.EventId == eventId);
             Assert.True(found, $"Expected failed message in {errorQueue} after bounded retry window; audit rows: {auditCount}.");
             Assert.Equal(0, auditCount);
+            recovered = Factory(host);
+            using var started = recovered.CreateClient();
         }
-        await using var recovered = Factory(host);
-        using var recoveredClient = recovered.CreateClient();
+        await using var recoveredHost = recovered ?? throw new InvalidOperationException("Recovery host was not started.");
+        using var recoveredClient = recoveredHost.CreateClient();
         var recoveryId = Guid.NewGuid();
-        await recovered.Services.GetRequiredService<IBus>().Publish(new OrderTransitionedV1(recoveryId, Guid.NewGuid(), orderId, "Recovered", DateTime.UtcNow), context => context.MessageId = recoveryId);
+        await recoveredHost.Services.GetRequiredService<IBus>().Publish(new OrderTransitionedV1(recoveryId, Guid.NewGuid(), orderId, "Recovered", DateTime.UtcNow), context => context.MessageId = recoveryId);
         var processed = false;
         for (var attempt = 0; attempt < 200; attempt++)
         {
-            using var scope = recovered.Services.CreateScope();
+            using var scope = recoveredHost.Services.CreateScope();
             processed = await scope.ServiceProvider.GetRequiredService<OrdersDb>().Audit.AnyAsync(x => x.EventId == recoveryId);
             if (processed) break;
             await Task.Delay(200);
         }
         Assert.True(processed, "Consumer did not process a new event after restart.");
-    }    private sealed class FakeDependencies : IOrderDependencies
+    }
+    private sealed class FakeDependencies : IOrderDependencies
     {
         public Task<bool> CustomerExistsAsync(Guid id, CancellationToken ct) => Task.FromResult(true);
         public Task<decimal?> ProductPriceAsync(Guid id, CancellationToken ct) => Task.FromResult<decimal?>(10m);
