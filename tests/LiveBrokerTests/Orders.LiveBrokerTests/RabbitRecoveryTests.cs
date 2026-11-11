@@ -96,12 +96,16 @@ public sealed class RabbitRecoveryTests
             Password = Required("ORDERS_LIVE_RABBIT_PASSWORD")
         };
         await using var connection = await connectionFactory.CreateConnectionAsync();
-        await using var channel = await connection.CreateChannelAsync();
         const string errorQueue = "OrderTransitionAudit_error";
         var found = false;
         for (var attempt = 0; attempt < 200; attempt++)
         {
-            found = (await channel.QueueDeclarePassiveAsync(errorQueue)).MessageCount > 0;
+            try
+            {
+                await using var channel = await connection.CreateChannelAsync();
+                found = (await channel.QueueDeclarePassiveAsync(errorQueue)).MessageCount > 0;
+            }
+            catch (RabbitMQ.Client.Exceptions.OperationInterruptedException) { }
             if (found) break;
             await Task.Delay(200);
         }
