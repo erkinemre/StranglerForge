@@ -15,13 +15,13 @@ public sealed class HttpOrderDependencies(IHttpClientFactory factory, IConfigura
     private readonly string token = configuration["OrdersInternal:Token"] ?? throw new InvalidOperationException("OrdersInternal:Token required.");
     public async Task<bool> CustomerExistsAsync(Guid id, CancellationToken ct)
     {
-        var response = await SendAsync(HttpMethod.Get, "orders-legacy", legacy, $"api/customers/{id}", null, Guid.NewGuid(), false, ct);
+        using var response = await SendAsync(HttpMethod.Get, "orders-legacy", legacy, $"api/customers/{id}", null, Guid.NewGuid(), false, ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return false;
         Ensure(response); return true;
     }
     public async Task<decimal?> ProductPriceAsync(Guid id, CancellationToken ct)
     {
-        var response = await SendAsync(HttpMethod.Get, "orders-catalog", catalog, $"api/products/{id}", null, Guid.NewGuid(), false, ct);
+        using var response = await SendAsync(HttpMethod.Get, "orders-catalog", catalog, $"api/products/{id}", null, Guid.NewGuid(), false, ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         Ensure(response);
         var product = await response.Content.ReadFromJsonAsync<ProductResponse>(cancellationToken: ct);
@@ -29,7 +29,7 @@ public sealed class HttpOrderDependencies(IHttpClientFactory factory, IConfigura
     }
     public async Task<ReserveOutcome> ReserveAsync(Guid orderId, Guid productId, int quantity, Guid correlationId, CancellationToken ct)
     {
-        var response = await SendAsync(HttpMethod.Post, "orders-inventory", inventory, "api/inventory/reservations", new { reservationId = orderId, orderId, productId, quantity }, correlationId, false, ct);
+        using var response = await SendAsync(HttpMethod.Post, "orders-inventory", inventory, "api/inventory/reservations", new { reservationId = orderId, orderId, productId, quantity }, correlationId, false, ct);
         if (response.IsSuccessStatusCode) return ReserveOutcome.Reserved;
         if (response.StatusCode == HttpStatusCode.Conflict)
         {
@@ -38,19 +38,32 @@ public sealed class HttpOrderDependencies(IHttpClientFactory factory, IConfigura
         }
         return ReserveOutcome.Uncertain;
     }
-    public async Task ReleaseAsync(Guid orderId, Guid correlationId, CancellationToken ct) => Ensure(await SendAsync(HttpMethod.Post, "orders-inventory", inventory, $"api/inventory/reservations/{orderId}/release", new { }, correlationId, false, ct));
-    public async Task ConfirmAsync(Guid orderId, Guid correlationId, CancellationToken ct) => Ensure(await SendAsync(HttpMethod.Post, "orders-inventory", inventory, $"api/inventory/reservations/{orderId}/confirm", new { }, correlationId, false, ct));
+    public async Task ReleaseAsync(Guid orderId, Guid correlationId, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Post, "orders-inventory", inventory, $"api/inventory/reservations/{orderId}/release", new { }, correlationId, false, ct);
+        Ensure(response);
+    }
+    public async Task ConfirmAsync(Guid orderId, Guid correlationId, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Post, "orders-inventory", inventory, $"api/inventory/reservations/{orderId}/confirm", new { }, correlationId, false, ct);
+        Ensure(response);
+    }
     public async Task<PaymentOutcome> AuthorizeAsync(Guid orderId, decimal amount, bool succeed, Guid correlationId, CancellationToken ct)
     {
         HttpResponseMessage response;
         try { response = await SendAsync(HttpMethod.Post, "orders-legacy", legacy, $"internal/payments/{orderId}/authorize", new { amount, succeed }, correlationId, true, ct); }
         catch (DependencyUnavailableException) { return PaymentOutcome.Uncertain; }
+        using var ownedResponse = response;
         if (response.StatusCode == HttpStatusCode.Conflict) return PaymentOutcome.Uncertain;
         if (!response.IsSuccessStatusCode) return PaymentOutcome.Uncertain;
         var result = await response.Content.ReadFromJsonAsync<PaymentResponse>(cancellationToken: ct);
         return result?.Succeeded == true ? PaymentOutcome.Authorized : PaymentOutcome.Rejected;
     }
-    public async Task RecordNotificationAsync(Guid orderId, Guid customerId, bool succeeded, Guid correlationId, CancellationToken ct) => Ensure(await SendAsync(HttpMethod.Post, "orders-legacy", legacy, $"internal/notifications/{orderId}", new { customerId, succeeded }, correlationId, true, ct));
+    public async Task RecordNotificationAsync(Guid orderId, Guid customerId, bool succeeded, Guid correlationId, CancellationToken ct)
+    {
+        using var response = await SendAsync(HttpMethod.Post, "orders-legacy", legacy, $"internal/notifications/{orderId}", new { customerId, succeeded }, correlationId, true, ct);
+        Ensure(response);
+    }
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string dependency, Uri root, string path, object? body, Guid correlationId, bool internalCall, CancellationToken ct)
     {
         try
