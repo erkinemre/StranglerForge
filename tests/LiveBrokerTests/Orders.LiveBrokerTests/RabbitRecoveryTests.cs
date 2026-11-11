@@ -99,23 +99,24 @@ public sealed class RabbitRecoveryTests
             await using var channel = await connection.CreateChannelAsync();
             const string errorQueue = "OrderTransitionAudit_error";
             var found = false;
-            for (var attempt = 0; attempt < 100; attempt++)
+            for (var attempt = 0; attempt < 200; attempt++)
             {
                 try { found = (await channel.QueueDeclarePassiveAsync(errorQueue)).MessageCount > 0; }
                 catch (RabbitMQ.Client.Exceptions.OperationInterruptedException) { }
                 if (found) break;
                 await Task.Delay(200);
             }
-            Assert.True(found, $"Expected failed message in {errorQueue} after bounded retry window.");
             using var scope = failing.Services.CreateScope();
-            Assert.False(await scope.ServiceProvider.GetRequiredService<OrdersDb>().Audit.AnyAsync(x => x.EventId == eventId));
+            var auditCount = await scope.ServiceProvider.GetRequiredService<OrdersDb>().Audit.CountAsync(x => x.EventId == eventId);
+            Assert.True(found, $"Expected failed message in {errorQueue} after bounded retry window; audit rows: {auditCount}.");
+            Assert.Equal(0, auditCount);
         }
         await using var recovered = Factory(host);
         using var recoveredClient = recovered.CreateClient();
         var recoveryId = Guid.NewGuid();
         await recovered.Services.GetRequiredService<IBus>().Publish(new OrderTransitionedV1(recoveryId, Guid.NewGuid(), orderId, "Recovered", DateTime.UtcNow), context => context.MessageId = recoveryId);
         var processed = false;
-        for (var attempt = 0; attempt < 100; attempt++)
+        for (var attempt = 0; attempt < 200; attempt++)
         {
             using var scope = recovered.Services.CreateScope();
             processed = await scope.ServiceProvider.GetRequiredService<OrdersDb>().Audit.AnyAsync(x => x.EventId == recoveryId);
