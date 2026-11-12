@@ -96,7 +96,9 @@ jobs:
       - name: Full solution tests
         run: dotnet test StranglerForge.slnx --no-restore -m:1 --blame-hang-timeout 5m --logger 'console;verbosity=normal'
       - name: Live MassTransit outbox and inbox recovery
-        run: dotnet test tests/LiveBrokerTests/Orders.LiveBrokerTests/Orders.LiveBrokerTests.csproj --logger 'console;verbosity=minimal' --blame-hang-timeout 3m
+        run: |
+          dotnet test tests/LiveBrokerTests/Orders.LiveBrokerTests/Orders.LiveBrokerTests.csproj --filter FullyQualifiedName~OfflineOutboxReplaysAndDuplicateDeliveryHasOneAuditEffect --logger 'console;verbosity=minimal' --blame-hang-timeout 3m
+          dotnet test tests/LiveBrokerTests/Orders.LiveBrokerTests/Orders.LiveBrokerTests.csproj --filter FullyQualifiedName~FailedConsumerMovesEventToErrorQueueAndProcessesAfterFaultRemoval --logger 'console;verbosity=minimal' --blame-hang-timeout 3m
       - name: Migration coordination live test
         run: dotnet test tests/LiveInfrastructureTests/MigrationAuthority.LiveTests/MigrationAuthority.LiveTests.csproj --logger 'console;verbosity=minimal'
 
