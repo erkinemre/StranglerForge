@@ -1,6 +1,6 @@
 # Publication result
 
-Status: Medium story published on 12 November 2026. GitHub publication branch pushed; PR pending.
+Status: Medium story published on 12 November 2026. GitHub publication branch pushed and PR #5 opened.
 
 - Author account verified in Medium: Erkin Emre Yılmaz (`@erkinemreyilmaz`).
 - Article title: From Legacy Monolith to Cloud-Native Microservices: Engineering a Safe Migration with the Strangler Fig Pattern.
@@ -15,6 +15,6 @@ Status: Medium story published on 12 November 2026. GitHub publication branch pu
 - Master: `article.md`; editing copy: `article-medium-ready.html`.
 - Visual assets: `visuals/`; editable source: `sources/`.
 - Documentation branch: `docs/medium-stranglerforge-architecture`.
-- GitHub PR: pending.
+- GitHub PR: https://github.com/erkinemre/StranglerForge/pull/5.
 
 The story is a reference implementation case study. No new application tests were run for this documentation-only publication.

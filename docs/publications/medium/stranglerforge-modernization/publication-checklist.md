@@ -13,6 +13,6 @@
 - [x] Verified fifteen headings, one JSON code block, eleven adjacent captions, seven links, and twelve saved alt descriptions on the live page. Mobile layout was not separately inspected.
 - [x] Set five topics; cover is the Medium preview image.
 - [x] Published from the verified Erkin Emre Yılmaz account and observed the live story URL.
-- [ ] Commit publication files, push documentation branch, and open PR.
+- [x] Committed publication files, pushed documentation branch, and opened PR #5.
 
 The unchecked items track external publication steps and must be updated from observed outcomes.
