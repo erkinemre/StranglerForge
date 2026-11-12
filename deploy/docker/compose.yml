@@ -4,7 +4,7 @@ services:
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: ${SQLSERVER_SA_PASSWORD:?Set SQLSERVER_SA_PASSWORD}
-    ports: ["1433:1433"]
+    ports: ["127.0.0.1:1433:1433"]
     volumes: ["sqlserver-data:/var/opt/mssql"]
     healthcheck:
       test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' > /dev/null"]
@@ -18,7 +18,7 @@ services:
       POSTGRES_USER: stranglerforge
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
       POSTGRES_DB: stranglerforge_catalog
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
     volumes: ["postgres-data:/var/lib/postgresql"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U stranglerforge -d stranglerforge_catalog"]
@@ -44,7 +44,7 @@ services:
       POSTGRES_USER: stranglerforge
       POSTGRES_PASSWORD: ${INVENTORY_POSTGRES_PASSWORD:?Set INVENTORY_POSTGRES_PASSWORD}
       POSTGRES_DB: stranglerforge_inventory
-    ports: ["5433:5432"]
+    ports: ["127.0.0.1:5433:5432"]
     volumes: ["inventory-postgres-data:/var/lib/postgresql"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U stranglerforge -d stranglerforge_inventory"]
@@ -58,7 +58,7 @@ services:
       POSTGRES_USER: stranglerforge
       POSTGRES_PASSWORD: ${ORDERS_POSTGRES_PASSWORD:?Set ORDERS_POSTGRES_PASSWORD}
       POSTGRES_DB: stranglerforge_orders
-    ports: ["5434:5432"]
+    ports: ["127.0.0.1:5434:5432"]
     volumes: ["orders-postgres-data:/var/lib/postgresql"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U stranglerforge -d stranglerforge_orders"]
@@ -72,7 +72,7 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?Set RABBITMQ_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?Set RABBITMQ_PASSWORD}
     volumes: ["../observability/rabbitmq-enabled-plugins:/etc/rabbitmq/enabled_plugins:ro"]
-    ports: ["5672:5672", "15672:15672"]
+    ports: ["127.0.0.1:5672:5672", "127.0.0.1:15672:15672"]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -127,7 +127,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    ports: ["5082:8080"]
+    ports: ["127.0.0.1:5082:8080"]
 
   inventory:
     build:
@@ -149,7 +149,7 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    ports: ["5083:8080"]
+    ports: ["127.0.0.1:5083:8080"]
 
   orders:
     build:
@@ -174,7 +174,7 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    ports: ["5084:8080"]
+    ports: ["127.0.0.1:5084:8080"]
 
   legacy:
     build:
@@ -203,7 +203,7 @@ services:
         condition: service_started
       orders:
         condition: service_started
-    ports: ["5081:8080"]
+    ports: ["127.0.0.1:5081:8080"]
 
   gateway:
     build:
@@ -370,3 +370,7 @@ volumes:
   postgres-data:
   inventory-postgres-data:
   orders-postgres-data:
+
+networks:
+  default:
+    name: stranglerforge-development

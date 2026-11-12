@@ -1,0 +1,454 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gateway
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+data:
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+  ReverseProxy__Clusters__legacy__Destinations__monolith__Address: http://legacy:8080/
+  ReverseProxy__Clusters__catalog__Destinations__service__Address: http://catalog:8080/
+  ReverseProxy__Clusters__inventory__Destinations__service__Address: http://inventory:8080/
+  ReverseProxy__Clusters__orders__Destinations__service__Address: http://orders:8080/
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      serviceAccountName: gateway
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: gateway
+        image: ghcr.io/erkinemre/stranglerforge-gateway:REPLACE_WITH_IMMUTABLE_DIGEST
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        env:
+          - name: ASPNETCORE_URLS
+            value: http://+:8080
+          - name: OTEL_SERVICE_NAME
+            value: stranglerforge-gateway
+        envFrom:
+          - configMapRef:
+              name: gateway-config
+          - secretRef:
+              name: gateway-secrets
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits: { cpu: 1000m, memory: 512Mi }
+        startupProbe:
+          httpGet: { path: /health/live, port: http }
+          periodSeconds: 5
+          failureThreshold: 24
+        livenessProbe:
+          httpGet: { path: /health/live, port: http }
+          periodSeconds: 10
+        readinessProbe:
+          httpGet: { path: /health/ready, port: http }
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+spec:
+  selector: { app: gateway }
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: legacy
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: legacy-config
+data:
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+  CatalogOwnership__Mode: Extracted
+  InventoryOwnership__Mode: Extracted
+  OrdersOwnership__Mode: Extracted
+  CatalogService__BaseUrl: http://catalog:8080/
+  InventoryService__BaseUrl: http://inventory:8080/
+  OrdersService__BaseUrl: http://orders:8080/
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: legacy
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: legacy
+  template:
+    metadata:
+      labels:
+        app: legacy
+    spec:
+      serviceAccountName: legacy
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: legacy
+        image: ghcr.io/erkinemre/stranglerforge-legacy:REPLACE_WITH_IMMUTABLE_DIGEST
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        env:
+          - name: ASPNETCORE_URLS
+            value: http://+:8080
+          - name: OTEL_SERVICE_NAME
+            value: stranglerforge-legacy
+        envFrom:
+          - configMapRef:
+              name: legacy-config
+          - secretRef:
+              name: legacy-secrets
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits: { cpu: 1000m, memory: 512Mi }
+        startupProbe:
+          httpGet: { path: /health/live, port: http }
+          periodSeconds: 5
+          failureThreshold: 24
+        livenessProbe:
+          httpGet: { path: /health/live, port: http }
+          periodSeconds: 10
+        readinessProbe:
+          httpGet: { path: /health/ready, port: http }
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: legacy
+spec:
+  selector: { app: legacy }
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: catalog
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: catalog-config
+data:
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+  Catalog__WritesEnabled: 'true'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: catalog
+  template:
+    metadata:
+      labels:
+        app: catalog
+    spec:
+      serviceAccountName: catalog
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: catalog
+        image: ghcr.io/erkinemre/stranglerforge-catalog:REPLACE_WITH_IMMUTABLE_DIGEST
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        env:
+          - name: ASPNETCORE_URLS
+            value: http://+:8080
+          - name: OTEL_SERVICE_NAME
+            value: stranglerforge-catalog
+        envFrom:
+          - configMapRef:
+              name: catalog-config
+          - secretRef:
+              name: catalog-secrets
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits: { cpu: 1000m, memory: 512Mi }
+        startupProbe:
+          httpGet: { path: /health/live, port: http }
+          periodSeconds: 5
+          failureThreshold: 24
+        livenessProbe:
+          httpGet: { path: /health/live, port: http }
+          periodSeconds: 10
+        readinessProbe:
+          httpGet: { path: /health/ready, port: http }
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog
+spec:
+  selector: { app: catalog }
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: inventory
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: inventory-config
+data:
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+  CatalogService__BaseUrl: http://catalog:8080/
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: inventory
+  template:
+    metadata:
+      labels:
+        app: inventory
+    spec:
+      serviceAccountName: inventory
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: inventory
+        image: ghcr.io/erkinemre/stranglerforge-inventory:REPLACE_WITH_IMMUTABLE_DIGEST
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        env:
+          - name: ASPNETCORE_URLS
+            value: http://+:8080
+          - name: OTEL_SERVICE_NAME
+            value: stranglerforge-inventory
+        envFrom:
+          - configMapRef:
+              name: inventory-config
+          - secretRef:
+              name: inventory-secrets
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits: { cpu: 1000m, memory: 512Mi }
+        startupProbe:
+          httpGet: { path: /health/live, port: http }
+          periodSeconds: 5
+          failureThreshold: 24
+        livenessProbe:
+          httpGet: { path: /health/live, port: http }
+          periodSeconds: 10
+        readinessProbe:
+          httpGet: { path: /health/ready, port: http }
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory
+spec:
+  selector: { app: inventory }
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orders
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: orders-config
+data:
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observability.svc.cluster.local:4317
+  LegacyService__BaseUrl: http://legacy:8080/
+  CatalogService__BaseUrl: http://catalog:8080/
+  InventoryService__BaseUrl: http://inventory:8080/
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: orders
+  template:
+    metadata:
+      labels:
+        app: orders
+    spec:
+      serviceAccountName: orders
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1654
+        runAsGroup: 1654
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: orders
+        image: ghcr.io/erkinemre/stranglerforge-orders:REPLACE_WITH_IMMUTABLE_DIGEST
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8080
+        env:
+          - name: ASPNETCORE_URLS
+            value: http://+:8080
+          - name: OTEL_SERVICE_NAME
+            value: stranglerforge-orders
+        envFrom:
+          - configMapRef:
+              name: orders-config
+          - secretRef:
+              name: orders-secrets
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits: { cpu: 1000m, memory: 512Mi }
+        startupProbe:
+          httpGet: { path: /health/live, port: http }
+          periodSeconds: 5
+          failureThreshold: 24
+        livenessProbe:
+          httpGet: { path: /health/live, port: http }
+          periodSeconds: 10
+        readinessProbe:
+          httpGet: { path: /health/ready, port: http }
+          periodSeconds: 5
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders
+spec:
+  selector: { app: orders }
+  ports:
+  - name: http
+    port: 8080
+    targetPort: http

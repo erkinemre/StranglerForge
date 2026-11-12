@@ -1,0 +1,5 @@
+# CI/CD quality gates
+
+GitHub Actions restores and builds .NET 10 with analyzers, runs gateway contract tests, builds the Docker-dependent test project, executes the full solution suite against isolated PostgreSQL and SQL Server service containers, runs the live migration authority test, validates YAML/dashboard/documentation shape and renders all Kustomize overlays, checks Compose interpolation, builds all five images, and runs isolated PostgreSQL/RabbitMQ Testcontainers checks. CI uses read-only repository permissions. It does not push images, apply manifests, or deploy.
+
+The deployment validator is deliberately static. Kubernetes API schema and cluster admission checks, image startup, service discovery, and ingress behavior require a Kubernetes environment. The Testcontainers check verifies infrastructure readiness and broker delivery; it does not prove application MassTransit recovery. A release should require green CI plus those environment qualifications, reviewed immutable image digests, database backups, and rollback evidence.

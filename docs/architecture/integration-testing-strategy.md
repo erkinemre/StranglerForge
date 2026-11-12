@@ -1,0 +1,7 @@
+# Integration testing strategy
+
+The normal solution suite exercises API contracts, domain invariants, EF Core migrations, inventory reservations, order saga outcomes, gateway routing, migration state, fault injection, and resilience with isolated test databases. It must run with separate Catalog, Inventory, Orders, and broker-test PostgreSQL databases and an isolated SQL Server catalog-source database.
+
+The [migration authority live test](../../tests/LiveInfrastructureTests/MigrationAuthority.LiveTests/CoordinationTests.cs) creates a random schema on a test PostgreSQL server and checks concurrent bootstrap, transitions, stale configuration, restart, and version conflicts. The [Testcontainers test](../../tests/LiveInfrastructureTests/Deployment.LiveTests/ContainerConnectivityTests.cs) starts isolated PostgreSQL and RabbitMQ containers, waits for readiness, performs a SQL query, and publishes and consumes a RabbitMQ message. It requires Docker and is an explicit CI gate; it does not replace the existing MassTransit live-broker recovery tests.
+
+Existing MassTransit outbox, inbox, retry, and saga tests remain. A complete environment qualification must additionally exercise live MassTransit outbox replay, poison-message/error queues, restart recovery, HTTP-to-event correlation, all five image startups, multi-replica gateway routing under coordination outage, and end-to-end order processing through ingress. Do not infer those outcomes from manifest parsing or a broker connectivity check.

@@ -1,0 +1,7 @@
+# Infrastructure security
+
+Application containers use the .NET non-root app identity, read-only root filesystem, dropped capabilities, disabled privilege escalation, dedicated service accounts without mounted API tokens, and startup/liveness/readiness probes. The ingress publishes only the gateway. Kubernetes Secrets are referenced by name and are not generated from checked-in credentials. Compose binds development database, broker, and observability ports to loopback; the gateway is the only public host port.
+
+The in-application migration administration endpoint requires the existing token and a loopback client. An ingress request cannot satisfy the loopback check; operators use a restricted pod-local maintenance path and audit the transition. Service-to-service HTTP token handling and stock adjustment authorization remain reference-project limitations. NetworkPolicy currently restricts inbound traffic only; outbound rules need cloud-specific endpoints before production deployment. Plain HTTP inside the cluster assumes a trusted cluster network. Add workload identity, mTLS, ingress TLS, managed secret rotation, image signing, vulnerability admission, backups, and least-privilege database principals before any production use.
+
+CI grants read-only repository permissions. No image is published and no deployment occurs. CI demonstration passwords are fixed only for disposable job-local containers; never reuse them outside CI.

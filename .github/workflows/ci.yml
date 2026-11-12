@@ -4,8 +4,11 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
-  build-and-gateway-tests:
+  static-and-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -13,8 +16,114 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Restore
-        run: dotnet restore StranglerForge.slnx
-      - name: Build
-        run: dotnet build StranglerForge.slnx --no-restore
-      - name: Gateway tests
+        run: dotnet restore StranglerForge.slnx -p:NuGetAudit=true
+      - name: Dependency security audit
+        run: |
+          dotnet list StranglerForge.slnx package --vulnerable --include-transitive --format json > package-audit.json
+          python scripts/check-package-audit.py package-audit.json
+      - name: Build and analyzers
+        run: dotnet build StranglerForge.slnx --no-restore -warnaserror
+      - name: Gateway contract and architecture tests
         run: dotnet test tests/IntegrationTests/StranglerForge.GatewayTests/StranglerForge.GatewayTests.csproj --no-restore
+      - name: Restore container tests
+        run: dotnet restore tests/LiveInfrastructureTests/Deployment.LiveTests/Deployment.LiveTests.csproj
+      - name: Build container tests
+        run: dotnet build tests/LiveInfrastructureTests/Deployment.LiveTests/Deployment.LiveTests.csproj --no-restore -warnaserror
+
+  integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: isolated-ci-password
+          POSTGRES_DB: migration_tests
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U test -d migration_tests"
+          --health-interval 5s --health-timeout 3s --health-retries 30
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: IsolatedCiPassword123!
+        ports: [1433:1433]
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'IsolatedCiPassword123!' -C -Q 'SELECT 1'"
+          --health-interval 10s --health-timeout 5s --health-retries 30
+    env:
+      CATALOG_TEST_CONNECTION: Host=localhost;Port=5432;Database=catalog_tests;Username=test;Password=isolated-ci-password
+      INVENTORY_TEST_CONNECTION: Host=localhost;Port=5432;Database=inventory_tests;Username=test;Password=isolated-ci-password
+      INVENTORY_BROKER_TEST_CONNECTION: Host=localhost;Port=5432;Database=inventory_broker_tests;Username=test;Password=isolated-ci-password
+      ORDERS_TEST_CONNECTION: Host=localhost;Port=5432;Database=orders_tests;Username=test;Password=isolated-ci-password
+      MIGRATION_TEST_CONNECTION: Host=localhost;Port=5432;Database=migration_tests;Username=test;Password=isolated-ci-password
+      CATALOG_SOURCE_CONNECTION: Server=localhost,1433;Database=CatalogSourceTests;User ID=sa;Password=IsolatedCiPassword123!;TrustServerCertificate=true
+      LEGACY_TEST_CONNECTION: Server=localhost,1433;Database=LegacyCommerceTests;User ID=sa;Password=IsolatedCiPassword123!;TrustServerCertificate=true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Create isolated databases
+        run: |
+          for database in catalog_tests inventory_tests inventory_broker_tests orders_tests; do
+            docker exec "$(docker ps -q --filter ancestor=postgres:18 | head -n 1)" psql -U test -d migration_tests -c "CREATE DATABASE $database"
+          done
+      - name: Restore
+        run: dotnet restore StranglerForge.slnx
+      - name: Apply isolated EF migrations
+        run: |
+          dotnet tool restore
+          ConnectionStrings__Inventory="$INVENTORY_TEST_CONNECTION" dotnet tool run dotnet-ef database update --project src/Services/Inventory/Inventory.Infrastructure --startup-project src/Services/Inventory/Inventory.Api
+          ConnectionStrings__Inventory="$INVENTORY_BROKER_TEST_CONNECTION" dotnet tool run dotnet-ef database update --project src/Services/Inventory/Inventory.Infrastructure --startup-project src/Services/Inventory/Inventory.Api
+          ConnectionStrings__Orders="$ORDERS_TEST_CONNECTION" dotnet tool run dotnet-ef database update --project src/Services/Orders/Orders.Infrastructure --startup-project src/Services/Orders/Orders.Api
+      - name: Full solution tests
+        run: dotnet test StranglerForge.slnx --no-restore -m:1 --blame-hang-timeout 5m --logger 'console;verbosity=normal'
+      - name: Migration coordination live test
+        run: dotnet test tests/LiveInfrastructureTests/MigrationAuthority.LiveTests/MigrationAuthority.LiveTests.csproj --logger 'console;verbosity=minimal'
+
+  container-and-manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Validate YAML and documentation links
+        run: |
+          python -m pip install 'PyYAML==6.0.3'
+          python scripts/validate-deployment.py
+      - uses: azure/setup-kubectl@v4
+        with:
+          version: v1.36.5
+      - name: Render Kubernetes overlays
+        run: |
+          kubectl kustomize deploy/kubernetes/base > /dev/null
+          kubectl kustomize deploy/kubernetes/overlays/development > /dev/null
+          kubectl kustomize deploy/kubernetes/overlays/production > /dev/null
+      - name: Validate Compose interpolation
+        env:
+          SQLSERVER_SA_PASSWORD: IsolatedCiPassword123!
+          POSTGRES_PASSWORD: isolated-ci-password
+          MIGRATION_POSTGRES_PASSWORD: isolated-ci-password
+          INVENTORY_POSTGRES_PASSWORD: isolated-ci-password
+          ORDERS_POSTGRES_PASSWORD: isolated-ci-password
+          RABBITMQ_USER: test
+          RABBITMQ_PASSWORD: isolated-ci-password
+          GRAFANA_ADMIN_PASSWORD: isolated-ci-password
+          ORDERS_INTERNAL_TOKEN: isolated-ci-token
+        run: docker compose -f deploy/docker/compose.yml config --quiet
+      - name: Build application images
+        run: |
+          while read -r project assembly image; do
+            docker build -f deploy/docker/Dockerfile --build-arg PROJECT="$project" --build-arg ASSEMBLY="$assembly" -t "stranglerforge/$image:ci" .
+          done <<'IMAGES'
+          src/Gateway/StranglerForge.Gateway/StranglerForge.Gateway.csproj StranglerForge.Gateway.dll gateway
+          src/LegacyMonolith/LegacyCommerce.Api/LegacyCommerce.Api.csproj LegacyCommerce.Api.dll legacy
+          src/Services/Catalog/Catalog.Api/Catalog.Api.csproj Catalog.Api.dll catalog
+          src/Services/Inventory/Inventory.Api/Inventory.Api.csproj Inventory.Api.dll inventory
+          src/Services/Orders/Orders.Api/Orders.Api.csproj Orders.Api.dll orders
+          IMAGES
+      - name: Isolated Testcontainers readiness and broker delivery
+        run: dotnet test tests/LiveInfrastructureTests/Deployment.LiveTests/Deployment.LiveTests.csproj --logger 'console;verbosity=minimal'
