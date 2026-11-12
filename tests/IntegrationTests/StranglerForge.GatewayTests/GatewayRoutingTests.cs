@@ -15,7 +15,6 @@ public sealed class GatewayRoutingTests
     [InlineData("POST", "/api/customers")]
     [InlineData("GET", "/api/customers/00000000-0000-0000-0000-000000000101")]
     [InlineData("GET", "/api/products")]
-    [InlineData("POST", "/api/products")]
     [InlineData("GET", "/api/inventory/00000000-0000-0000-0000-000000000201")]
     [InlineData("POST", "/api/inventory/00000000-0000-0000-0000-000000000201/stock")]
     [InlineData("POST", "/api/orders")]
@@ -94,9 +93,11 @@ public sealed class GatewayRoutingTests
         using var client = gateway.CreateClient();
         using var catalogResponse = await client.GetAsync("/api/products");
         using var detailResponse = await client.GetAsync("/api/products/00000000-0000-0000-0000-000000000201");
+        using var writeResponse = await client.PostAsJsonAsync("/api/products", new { marker = "catalog-write" });
         using var customerResponse = await client.GetAsync("/api/customers/00000000-0000-0000-0000-000000000101");
         Assert.Equal("catalog", catalogResponse.Headers.GetValues("X-Legacy").Single());
         Assert.Equal("catalog", detailResponse.Headers.GetValues("X-Legacy").Single());
+        Assert.Equal("catalog", writeResponse.Headers.GetValues("X-Legacy").Single());
         Assert.Equal("legacy", customerResponse.Headers.GetValues("X-Legacy").Single());
     }
 
@@ -142,6 +143,7 @@ public sealed class GatewayRoutingTests
             builder.ConfigureAppConfiguration((_, config) =>
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
+                    ["MigrationControl:StateFile"] = $"migration-state-test-routing-{Guid.NewGuid():N}.json",
                     ["ReverseProxy:Clusters:legacy:Destinations:monolith:Address"] = destination,
                     ["ReverseProxy:Clusters:catalog:Destinations:service:Address"] = catalogDestination ?? destination,
                     ["ReverseProxy:Clusters:inventory:Destinations:service:Address"] = inventoryDestination ?? destination,

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using RabbitMQ.Client;
 using StranglerForge.Orders.Application;
 using StranglerForge.Orders.Infrastructure;
 using Xunit;
@@ -17,14 +18,16 @@ namespace Orders.LiveBrokerTests;
 public sealed class RabbitRecoveryTests
 {
     private static string Required(string name) => Environment.GetEnvironmentVariable(name) ?? throw new InvalidOperationException($"{name} is required. Run this project only against an isolated live RabbitMQ virtual host and Orders test database.");
-    private static WebApplicationFactory<Program> Factory(string host)
+    private static WebApplicationFactory<Program> Factory(string host, bool failAudit = false)
     {
         var db = Required("ORDERS_LIVE_TEST_CONNECTION");
         var user = Required("ORDERS_LIVE_RABBIT_USER");
         var password = Required("ORDERS_LIVE_RABBIT_PASSWORD");
         var vhost = Required("ORDERS_LIVE_RABBIT_VHOST");
         return new WebApplicationFactory<Program>().WithWebHostBuilder(builder => builder
+            .UseEnvironment("Development")
             .UseSetting("ConnectionStrings:Orders", db)
+            .UseSetting("FaultInjection:FailOrderAuditConsumer", failAudit.ToString())
             .UseSetting("OrdersInternal:Token", "isolated-live-test")
             .UseSetting("RabbitMq:UseInMemory", "false")
             .UseSetting("RabbitMq:Host", host)
@@ -74,6 +77,56 @@ public sealed class RabbitRecoveryTests
         Assert.True(await result.Audit.AnyAsync(x => x.OrderId == orderId));
         Assert.Equal(1, await result.Audit.CountAsync(x => x.EventId == eventId));
         Assert.Equal(1, await result.Set<InboxState>().CountAsync(x => x.MessageId == eventId));
+    }
+    [Fact]
+    public async Task FailedConsumerMovesEventToErrorQueueAndProcessesAfterFaultRemoval()
+    {
+        var eventId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var host = Required("ORDERS_LIVE_RABBIT_HOST");
+        await using var factory = Factory(host, failAudit: true);
+        using var client = factory.CreateClient();
+        var bus = factory.Services.GetRequiredService<IBus>();
+        await bus.Publish(new OrderTransitionedV1(eventId, Guid.NewGuid(), orderId, "FailureProbe", DateTime.UtcNow), context => context.MessageId = eventId);
+        var connectionFactory = new ConnectionFactory
+        {
+            HostName = host,
+            VirtualHost = Required("ORDERS_LIVE_RABBIT_VHOST"),
+            UserName = Required("ORDERS_LIVE_RABBIT_USER"),
+            Password = Required("ORDERS_LIVE_RABBIT_PASSWORD")
+        };
+        await using var connection = await connectionFactory.CreateConnectionAsync();
+        const string errorQueue = "OrderTransitionAudit_error";
+        var found = false;
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            try
+            {
+                await using var channel = await connection.CreateChannelAsync();
+                found = (await channel.QueueDeclarePassiveAsync(errorQueue)).MessageCount > 0;
+            }
+            catch (RabbitMQ.Client.Exceptions.OperationInterruptedException) { }
+            if (found) break;
+            await Task.Delay(200);
+        }
+        using (var scope = factory.Services.CreateScope())
+        {
+            var auditCount = await scope.ServiceProvider.GetRequiredService<OrdersDb>().Audit.CountAsync(x => x.EventId == eventId);
+            Assert.True(found, $"Expected failed message in {errorQueue} after bounded retry window; audit rows: {auditCount}.");
+            Assert.Equal(0, auditCount);
+        }
+        factory.Services.GetRequiredService<Microsoft.Extensions.Configuration.IConfiguration>()["FaultInjection:FailOrderAuditConsumer"] = "false";
+        var recoveryId = Guid.NewGuid();
+        await bus.Publish(new OrderTransitionedV1(recoveryId, Guid.NewGuid(), orderId, "Recovered", DateTime.UtcNow), context => context.MessageId = recoveryId);
+        var processed = false;
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            using var scope = factory.Services.CreateScope();
+            processed = await scope.ServiceProvider.GetRequiredService<OrdersDb>().Audit.AnyAsync(x => x.EventId == recoveryId);
+            if (processed) break;
+            await Task.Delay(200);
+        }
+        Assert.True(processed, "Consumer did not process a new event after fault removal.");
     }
     private sealed class FakeDependencies : IOrderDependencies
     {

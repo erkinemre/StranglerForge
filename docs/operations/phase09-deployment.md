@@ -11,10 +11,10 @@ Build each image using `docker build -f deploy/docker/Dockerfile --build-arg PRO
 | Secret | Keys |
 | --- | --- |
 | gateway | `ConnectionStrings__MigrationControl`, `MigrationControl__AdminToken` |
-| legacy | `ConnectionStrings__LegacyCommerce`, `OrdersInternal__Token` |
+| legacy | `ConnectionStrings__LegacyCommerce`, `OrdersInternal__Token`, `Inventory__ReservationToken` |
 | catalog | `ConnectionStrings__Catalog` |
-| inventory | `ConnectionStrings__Inventory`, `RabbitMq__Host`, `RabbitMq__Username`, `RabbitMq__Password` |
-| orders | `ConnectionStrings__Orders`, `RabbitMq__Host`, `RabbitMq__Username`, `RabbitMq__Password`, `OrdersInternal__Token` |
+| inventory | `ConnectionStrings__Inventory`, `Inventory__StockAdminToken`, `Inventory__ReservationToken`, `RabbitMq__Host`, `RabbitMq__Username`, `RabbitMq__Password` |
+| orders | `ConnectionStrings__Orders`, `Inventory__ReservationToken`, `RabbitMq__Host`, `RabbitMq__Username`, `RabbitMq__Password`, `OrdersInternal__Token` |
 
 Create secrets through a managed secret controller or `kubectl -n stranglerforge create secret generic <name> --from-env-file=<ignored-file>`; do not commit that file. Set the real ingress host and TLS in a reviewed overlay. Run `kubectl kustomize deploy/kubernetes/overlays/production` and review the output before `kubectl apply -k deploy/kubernetes/overlays/production`. Install an ingress controller and metrics server first. Deploy managed SQL Server, PostgreSQL databases, RabbitMQ, and observability endpoints separately; the manifests do not create stateful workloads.
 

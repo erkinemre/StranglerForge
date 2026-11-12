@@ -14,7 +14,7 @@ public sealed class LegacySqlInventoryGateway(ICommerceStore store) : IInventory
     public Task ConfirmAsync(Guid reservationId, CancellationToken ct) => Task.CompletedTask;
 }
 
-public sealed class InventoryHttpGateway(HttpClient client, ICorrelationIdAccessor correlation, ILogger<InventoryHttpGateway> logger) : IInventoryGateway
+public sealed class InventoryHttpGateway(HttpClient client, ICorrelationIdAccessor correlation, ILogger<InventoryHttpGateway> logger, Microsoft.Extensions.Configuration.IConfiguration? configuration = null) : IInventoryGateway
 {
     public async Task<InventoryStockSnapshot?> GetStockAsync(Guid productId, CancellationToken ct)
     {
@@ -68,6 +68,12 @@ public sealed class InventoryHttpGateway(HttpClient client, ICorrelationIdAccess
     {
         using var request = new HttpRequestMessage(method, path);
         if (body is not null) request.Content = JsonContent.Create(body);
+        if (method != HttpMethod.Get)
+        {
+            var stock = path.EndsWith("/stock", StringComparison.OrdinalIgnoreCase);
+            var token = configuration?[stock ? "Inventory:StockAdminToken" : "Inventory:ReservationToken"];
+            if (!string.IsNullOrWhiteSpace(token)) request.Headers.TryAddWithoutValidation(stock ? "X-Inventory-Admin-Token" : "X-Inventory-Internal-Token", token);
+        }
         if (!string.IsNullOrWhiteSpace(correlation.CorrelationId)) request.Headers.TryAddWithoutValidation("X-Correlation-ID", correlation.CorrelationId);
         try { return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct); }
         catch (Exception exception) when (exception is HttpRequestException or BrokenCircuitException or TimeoutRejectedException or TaskCanceledException && !ct.IsCancellationRequested)

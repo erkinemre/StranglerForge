@@ -141,6 +141,8 @@ services:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
       ConnectionStrings__Inventory: Host=inventory-postgres;Port=5432;Database=stranglerforge_inventory;Username=stranglerforge;Password=${INVENTORY_POSTGRES_PASSWORD}
       CatalogService__BaseUrl: http://catalog:8080/
+      Inventory__StockAdminToken: ${INVENTORY_STOCK_ADMIN_TOKEN:?Set INVENTORY_STOCK_ADMIN_TOKEN}
+      Inventory__ReservationToken: ${INVENTORY_RESERVATION_TOKEN:?Set INVENTORY_RESERVATION_TOKEN}
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: ${RABBITMQ_USER}
       RabbitMq__Password: ${RABBITMQ_PASSWORD}
@@ -165,6 +167,7 @@ services:
       LegacyService__BaseUrl: http://legacy:8080/
       CatalogService__BaseUrl: http://catalog:8080/
       InventoryService__BaseUrl: http://inventory:8080/
+      Inventory__ReservationToken: ${INVENTORY_RESERVATION_TOKEN:?Set INVENTORY_RESERVATION_TOKEN}
       OrdersInternal__Token: ${ORDERS_INTERNAL_TOKEN:?Set ORDERS_INTERNAL_TOKEN}
       RabbitMq__Host: rabbitmq
       RabbitMq__Username: ${RABBITMQ_USER}
@@ -193,6 +196,7 @@ services:
       InventoryService__BaseUrl: http://inventory:8080/
       OrdersOwnership__Mode: Extracted
       OrdersService__BaseUrl: http://orders:8080/
+      Inventory__ReservationToken: ${INVENTORY_RESERVATION_TOKEN:?Set INVENTORY_RESERVATION_TOKEN}
       OrdersInternal__Token: ${ORDERS_INTERNAL_TOKEN:?Set ORDERS_INTERNAL_TOKEN}
     depends_on:
       sqlserver:

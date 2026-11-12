@@ -1,5 +1,5 @@
 # Target architecture
-This is planned, not Phase 01 implementation.
+This diagram is an aspirational fully extracted topology. Phase 10 ends with a hybrid architecture: Customers, Payments, and Notifications still run in LegacyCommerce. See [final engineering review](final-engineering-review.md) for the implemented topology.
 ```mermaid
 flowchart LR
   Client --> Gateway[YARP Gateway]

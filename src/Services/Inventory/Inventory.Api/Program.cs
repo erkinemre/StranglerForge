@@ -59,24 +59,24 @@ app.MapPost("/api/inventory/{productId:guid}/stock", async (Guid productId, Stoc
     if (input.Quantity <= 0) return Results.BadRequest("Quantity must be positive.");
     var result = await useCases.AdjustAsync(productId, input.Quantity, "API stock addition", ct);
     return result.Succeeded ? Results.Ok(new { productId, quantity = result.Value!.Available }) : result.Error == "Product does not exist." ? Results.NotFound() : Results.Conflict(result.Error);
-});
+}).RequireInventoryWriteToken("Inventory:StockAdminToken");
 app.MapPost("/api/inventory/reservations", async (ReserveInput input, InventoryUseCases useCases, CancellationToken ct) =>
 {
     var result = await useCases.ReserveAsync(new ReserveStock(input.ReservationId, input.OrderId, input.ProductId, input.Quantity), ct);
     return result.Succeeded ? Results.Ok(result.Value) : Results.Conflict(result.Error);
-});
+}).RequireInventoryWriteToken("Inventory:ReservationToken");
 app.MapGet("/api/inventory/reservations/{id:guid}", async (Guid id, InventoryUseCases useCases, CancellationToken ct) =>
     await useCases.GetReservationAsync(id, ct) is { } reservation ? Results.Ok(reservation) : Results.NotFound());
 app.MapPost("/api/inventory/reservations/{id:guid}/release", async (Guid id, InventoryUseCases useCases, CancellationToken ct) =>
 {
     var result = await useCases.ReleaseAsync(id, ct);
     return result.Succeeded ? Results.Ok(result.Value) : result.Error == "Reservation does not exist." ? Results.NotFound() : Results.Conflict(result.Error);
-});
+}).RequireInventoryWriteToken("Inventory:ReservationToken");
 app.MapPost("/api/inventory/reservations/{id:guid}/confirm", async (Guid id, InventoryUseCases useCases, CancellationToken ct) =>
 {
     var result = await useCases.ConfirmAsync(id, ct);
     return result.Succeeded ? Results.Ok(result.Value) : result.Error == "Reservation does not exist." ? Results.NotFound() : Results.Conflict(result.Error);
-});
+}).RequireInventoryWriteToken("Inventory:ReservationToken");
 if (builder.Configuration.GetValue<bool>("Inventory:DiagnosticsEnabled"))
     app.MapGet("/internal/inventory/outbox", async (InventoryDb db, CancellationToken ct) => Results.Ok(new { pending = await db.Set<MassTransit.EntityFrameworkCoreIntegration.OutboxMessage>().CountAsync(ct) }));
 app.Run();
