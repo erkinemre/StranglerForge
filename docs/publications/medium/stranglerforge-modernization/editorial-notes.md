@@ -42,4 +42,3 @@ The image order follows the narrative rather than diagram filename order. The ar
 ## Publication checks
 
 Before publishing to Medium, verify the intended signed-in author, check existing stories and drafts for this title, upload the cover and each PNG, apply heading and code formatting, set topics, inspect a full preview, and verify the public URL after publication. Medium may strip or reinterpret pasted HTML; the repository HTML is a transport/editing aid, not evidence of a successfully published story.
-

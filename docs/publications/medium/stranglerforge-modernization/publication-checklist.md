@@ -8,12 +8,11 @@
 - [x] Included alt text and captions for the cover and figures.
 - [x] Created the HTML editing copy from the Markdown master.
 - [x] Checked implementation claims against source and evidence limits.
-- [ ] Confirm no existing Medium draft or published duplicate.
-- [ ] Upload cover and all figures to Medium in article order.
-- [ ] Verify headings, code formatting, captions, links, alt text, and mobile preview in Medium.
-- [ ] Set relevant Medium topics and featured image.
-- [ ] Publish from the verified Erkin Emre Yılmaz account and confirm the public URL.
+- [x] Confirmed no existing Medium draft or published duplicate in the author account.
+- [x] Pasted article with cover and all eleven figures; Medium assigned twelve CDN image URLs.
+- [x] Verified fifteen headings, one JSON code block, eleven adjacent captions, seven links, and twelve saved alt descriptions on the live page. Mobile layout was not separately inspected.
+- [x] Set five topics; cover is the Medium preview image.
+- [x] Published from the verified Erkin Emre Yılmaz account and observed the live story URL.
 - [ ] Commit publication files, push documentation branch, and open PR.
 
 The unchecked items track external publication steps and must be updated from observed outcomes.
-

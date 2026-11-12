@@ -24,4 +24,3 @@
 - Kubernetes, [Performing a rolling update](https://kubernetes.io/docs/tasks/run-application/update-deployment-rolling/).
 
 External references explain general mechanisms; repository files establish what this project actually implements.
-

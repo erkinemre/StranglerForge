@@ -192,4 +192,3 @@ The project is an executable reference, with tested behaviors and documented lim
 ---
 
 **Further reading:** [Fowler's original Strangler Fig discussion](https://martinfowler.com/bliki/StranglerFigApplication.html); [YARP configuration](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/yarp/config-files); [RabbitMQ reliability](https://www.rabbitmq.com/docs/reliability); [PostgreSQL explicit locking](https://www.postgresql.org/docs/current/explicit-locking.html); [OpenTelemetry signals](https://opentelemetry.io/docs/concepts/signals/); [Kubernetes rolling updates](https://kubernetes.io/docs/tasks/run-application/update-deployment-rolling/).
-
